@@ -838,9 +838,16 @@ void RecompStackPopYield(void) { recomp_stack_pop_common(0); }
 // Set before calling run_frame, checked by generated code periodically.
 static clock_t g_frame_start_clock;
 static int g_watchdog_enabled;
-static int g_watchdog_counter;
+int g_watchdog_counter;
 jmp_buf g_watchdog_jmp;
 int g_watchdog_tripped;
+
+// Debug globals (referenced by common_rtl.h and game code)
+int g_debug_dma = 0;
+int g_debug_apu = 0;
+int g_debug_watchdog = 0;
+int g_watchdog_triggered = 0;
+uint64_t g_watchdog_frame_start = 0;
 
 void WatchdogFrameStart(void) {
   g_frame_start_clock = clock();

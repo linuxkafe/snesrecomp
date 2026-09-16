@@ -455,3 +455,20 @@ enum {
 
   kJoypadH_AnyDir = 0xf,
 };
+
+/* Debug/watchdog globals (defined in common_cpu_infra.c) */
+extern int g_debug_dma;
+extern int g_debug_apu;
+extern int g_debug_watchdog;
+extern int g_watchdog_triggered;
+extern uint64_t g_watchdog_frame_start;
+extern int g_watchdog_counter;
+void SimCity_InstallWatchdogHandler(void);
+
+
+#define RECOMP_STACK_DEPTH 64
+
+/* Recomp stack (defined in common_cpu_infra.c) */
+extern const char *g_recomp_stack[RECOMP_STACK_DEPTH];
+extern int g_recomp_stack_top;
+
