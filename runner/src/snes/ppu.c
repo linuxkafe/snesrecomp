@@ -2728,6 +2728,8 @@ uint8_t ppu_read(Ppu* ppu, uint8_t adr) {
       return val;
     }
     default: {
+      fprintf(stderr, "ppu_read: unhandled port read of 0x30+%02x\n", adr);
+      fflush(stderr);
       assert(0);
       return 0;
     }
@@ -2968,7 +2970,6 @@ void ppu_write(Ppu* ppu, uint8_t adr, uint8_t val) {
       break;
     }
     case BGMODE & 0xff:
-      assert((val & 0xf0) == 0);
       ppu->bgmode = val;
       break;
     case MOSAIC & 0xff:

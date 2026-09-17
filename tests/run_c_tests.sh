@@ -40,6 +40,16 @@ echo "=== PPU sprite limits ==="
     -o "$OUT/ppu_sprite_limit_test"
 "$OUT/ppu_sprite_limit_test"
 
+echo "=== PPU BGMODE write accepts a full byte ==="
+"$CC" -std=c11 -Wall -Wextra -O1 \
+    -DSNESRECOMP_REVERSE_DEBUG=0 \
+    -I "$ROOT/runner/src" -I "$ROOT/runner/src/snes" \
+    "$ROOT/tests/ppu/ppu_bgmode_write_test.c" \
+    "$ROOT/runner/src/snes/ppu.c" \
+    "$ROOT/runner/src/snes/ppu_legacy.c" \
+    -o "$OUT/ppu_bgmode_write_test"
+"$OUT/ppu_bgmode_write_test"
+
 echo "=== PPU widescreen world-mirror band ==="
 "$CC" -std=c11 -Wall -Wextra -O1     -DSNESRECOMP_REVERSE_DEBUG=0     -I "$ROOT/runner/src" -I "$ROOT/runner/src/snes"     "$ROOT/tests/ppu/ppu_world_mirror_test.c"     "$ROOT/runner/src/snes/ppu.c"     "$ROOT/runner/src/snes/ppu_legacy.c"     -o "$OUT/ppu_world_mirror_test"
 "$OUT/ppu_world_mirror_test"

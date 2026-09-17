@@ -252,8 +252,14 @@ void snes_catchup_stats(uint64_t *calls, uint64_t *cycles) {
 }
 
 uint8_t snes_readBBus(Snes* snes, uint8_t adr) {
-  if(adr < 0x40) {
+  if(adr >= 0x34 && adr < 0x40) {
     return ppu_read(g_ppu, adr);
+  }
+  if(adr < 0x40) {
+    /* Read of a write-only PPU register ($2100-$2133): hardware returns
+     * the bus/MDR value, matching ReadRegOpenBus. */
+    extern CpuState g_cpu;
+    return g_cpu.open_bus;
   }
   if(adr < 0x80) {
     // APU port read ($2140-$217F). Synchronize the SPC to this exact guest

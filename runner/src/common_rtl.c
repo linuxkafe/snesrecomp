@@ -1462,8 +1462,13 @@ uint8 ReadRegOpenBus(uint16 reg, uint8 open_bus) {
     cart_sync_coprocessors(g_snes->cart, g_cpu.master_cycles);
     return cart_read(g_snes->cart, 0, reg);
   }
-  if (reg >= 0x2100 && reg < 0x2140) {
+  if (reg >= 0x2134 && reg < 0x2140) {
     return ppu_read(g_ppu, reg & 0xff);
+  } else if (reg >= 0x2100 && reg < 0x2134) {
+    /* Read of a write-only PPU1/PPU2 register. On hardware these reads
+     * return the bus/MDR value rather than a register: SimCity won't boot
+     * past the attract loop if this aborts, and bsnes returns the mdr. */
+    return open_bus;
   } else if (reg >= 0x2140 && reg < 0x2180) {
     // APU read — route through emulator (real SPC700 outPorts).
     return snes_read(g_snes, reg);
