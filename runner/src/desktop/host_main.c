@@ -2638,10 +2638,47 @@ int snesrecomp_desktop_main(const SnesDesktopHostGame *game, int argc, char **ar
   /* Load (or generate) keybinds.ini next to the executable. */
   keybinds_init(program_path);
 
+  /* SNESRECOMP_RESOLUTION=<720p|800p|1080p|WxH> pins the initial window to a
+   * fixed display size, mirroring the launcher's custom WindowSize. The
+   * renderer viewport keeps the game's aspect (letterboxed) exactly as it
+   * does for any dragged-resized window; integer content scale remains an
+   * orthogonal choice (WindowScale / WindowBigger/Smaller). */
+  bool preset_size = false;
+  int preset_w = 0, preset_h = 0;
+  const char *resolution = HostGetenv("RESOLUTION");
+  if (resolution && *resolution) {
+    struct { const char *name; int w, h; } resolutions[] = {
+      { "480p", 640, 480 },   { "720p", 1280, 720 }, { "800p", 1280, 800 },
+      { "1080p", 1920, 1080 }, { "1440p", 2560, 1440 }, { "2160p", 3840, 2160 },
+    };
+    for (int i = 0; i < (int)(sizeof(resolutions) / sizeof(resolutions[0])); i++) {
+      if (StringEqualsNoCase(resolution, resolutions[i].name)) {
+        preset_w = resolutions[i].w;
+        preset_h = resolutions[i].h;
+        break;
+      }
+    }
+    if (preset_w == 0 && preset_h == 0) {
+      if (sscanf(resolution, "%dx%d", &preset_w, &preset_h) != 2 ||
+          preset_w <= 0 || preset_h <= 0) {
+        fprintf(stderr, "Warning: unrecognized SNESRECOMP_RESOLUTION='%s' "
+                        "(expected 720p, 800p, 1080p or WxH)\n", resolution);
+        preset_w = preset_h = 0;
+      }
+    }
+    if (preset_w > 0 && preset_h > 0) {
+      preset_size = true;
+      host_report_breadcrumb("resolution preset %s -> window %dx%d",
+                             resolution, preset_w, preset_h);
+    }
+  }
+
   bool custom_size = g_config.window_width != 0 && g_config.window_height != 0;
-  int window_width = custom_size ? g_config.window_width :
+  int window_width = preset_size ? preset_w :
+      custom_size ? g_config.window_width :
       g_current_window_scale * WindowBaseWidth(g_snes_width);
-  int window_height = custom_size ? g_config.window_height :
+  int window_height = preset_size ? preset_h :
+      custom_size ? g_config.window_height :
       g_current_window_scale * WindowBaseHeight();
 
   RendererApply(RendererChoice());
