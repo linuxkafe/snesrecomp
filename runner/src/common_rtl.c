@@ -2392,6 +2392,31 @@ static const uint8 *SimpleHdma_GetPtr(uint32 p) {
   if (bank == 0x7F) return g_ram + 0x10000 + addr;
   if ((bank < 0x40 || (bank >= 0x80 && bank < 0xC0)) && addr < 0x2000)
     return g_ram + addr;
+  /* ROM address: validate against ROM size to avoid off-rails reads
+   * that return &g_rom[0] and corrupt HDMA transfers. */
+  if (g_snes && g_snes->cart && g_snes->cart->romSize > 0) {
+    uint32_t off;
+    switch (g_snes->cart->type) {
+      case CART_LOROM:
+      case CART_DSP1:
+      case CART_CX4: {
+        uint8_t canonical = bank & 0x7f;
+        if (addr < 0x8000 && canonical < 0x40) return NULL;
+        off = ((uint32_t)canonical << 15) | (addr & 0x7fff);
+        break;
+      }
+      case CART_DSP1_HIROM:
+      case CART_HIROM: {
+        uint8_t canonical = bank & 0x7f;
+        if (addr < 0x8000 && canonical < 0x40) return NULL;
+        off = ((uint32_t)(canonical & 0x3f) << 16) | addr;
+        break;
+      }
+      default:
+        return RomPtr(p);
+    }
+    if (off >= g_snes->cart->romSize) return NULL;
+  }
   return RomPtr(p);
 }
 
