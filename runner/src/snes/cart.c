@@ -150,6 +150,7 @@ uint8_t *cart_getRomPtr(Cart *cart, uint8_t bank, uint16_t adr) {
       uint8_t canonical = bank & 0x7f;
       if (adr < 0x8000 && canonical < 0x40) return NULL;
       off = ((uint32_t)canonical << 15) | (adr & 0x7fff);
+      if (off >= cart->romSize) return NULL;
       break;
     }
     case CART_DSP1: {
@@ -159,6 +160,7 @@ uint8_t *cart_getRomPtr(Cart *cart, uint8_t bank, uint16_t adr) {
       uint8_t canonical = bank & 0x7f;
       if (adr < 0x8000 && canonical < 0x40) return NULL;
       off = ((uint32_t)canonical << 15) | (adr & 0x7fff);
+      if (off >= cart->romSize) return NULL;
       break;
     }
     case CART_DSP1_HIROM: {
@@ -168,12 +170,14 @@ uint8_t *cart_getRomPtr(Cart *cart, uint8_t bank, uint16_t adr) {
       uint8_t canonical = bank & 0x7f;
       if (adr < 0x8000 && canonical < 0x40) return NULL;
       off = ((uint32_t)(canonical & 0x3f) << 16) | adr;
+      if (off >= cart->romSize) return NULL;
       break;
     }
     case CART_HIROM: {
       uint8_t canonical = bank & 0x7f;
       if (adr < 0x8000 && canonical < 0x40) return NULL;
       off = ((uint32_t)(canonical & 0x3f) << 16) | adr;
+      if (off >= cart->romSize) return NULL;
       break;
     }
 case CART_CX4: {
@@ -183,6 +187,7 @@ case CART_CX4: {
       uint8_t canonical = bank & 0x7f;
       if (adr < 0x8000 && canonical < 0x40) return NULL;
       off = ((uint32_t)canonical << 15) | (adr & 0x7fff);
+      if (off >= cart->romSize) return NULL;
       break;
     }
     case CART_SDD1: {
@@ -228,6 +233,7 @@ case CART_CX4: {
       uint8_t canonical = bank & 0x7f;
       if (adr < 0x8000 && canonical < 0x40) return NULL;
       off = ((uint32_t)canonical << 15) | (adr & 0x7fff);
+      if (off >= cart->romSize) return NULL;
       break;
     }
     case CART_SA1:
