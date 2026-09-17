@@ -46,6 +46,7 @@
 #include "snes/apu.h"
 #include "snes/dsp.h"
 #include "snes/snes.h"
+#include "snes/joypad.h"
 #include "snes/ws_shadow.h"
 #include "audio_trace.h"
 
@@ -237,6 +238,13 @@ static SDL_Window *g_window;
 static uint8 g_paused, g_turbo, g_cursor = true;
 static uint8 g_current_window_scale;
 static uint32 g_input_state;
+/* SNES Mouse on port 2: starts unplugged; SNESRECOMP_MOUSE=1 plugs it in and
+ * feeds the last frame's host pointer deltas into the joypad layer. */
+static bool g_mouse_enabled;
+static int g_mouse_last_x, g_mouse_last_y;
+/* SNESRECOMP_PAD_PROBE=1 logs each port's manual-read depth so a headless
+ * run can prove whether a game is serial-reading a device on that port. */
+static bool g_pad_probe;
 /* Gamepad-driven SNES controller bits, kept separate from g_input_state
  * (keyboard) so the per-frame keybinds.ini polling at the top of the
  * main loop doesn't clear bits the gamepad just set. OR'd into `inputs`
@@ -2720,6 +2728,26 @@ error_reading:;
     Die(buf);
     return 1;
   }
+  /* SNESRECOMP_MOUSE=1: plug a SNES Mouse into port 2 (player 2), which is
+   * where the original SimCity mouse software reads it. The OS pointer hides
+   * so the game's own cursor is the only one on screen; deltas are captured
+   * per frame in the main loop and owned by the joypad layer's strobe latch. */
+  {
+    const char *v = HostGetenv("MOUSE");
+    if (v && atoi(v)) {
+      joypad_set_device(1, KJOY_DEV_MOUSE);
+      g_mouse_enabled = true;
+      /* Anchor the delta track so frame 1 does not inherit the desktop
+       * cursor's absolute position as an enormous first motion. */
+      SDL_GetMouseState(&g_mouse_last_x, &g_mouse_last_y);
+      snesrecomp_sdl_show_cursor(false);
+      host_report_breadcrumb("SNES Mouse enabled on port 2 (player 2)");
+    }
+  }
+  {
+    const char *v = HostGetenv("PAD_PROBE");
+    g_pad_probe = v && atoi(v);
+  }
 #if SNESRECOMP_ENABLE_MODS
   /* Plugins act on a machine that exists: after SnesInit, before frame 1. */
   if (g_mods_ready)
@@ -3272,6 +3300,27 @@ error_reading:;
      * saw, and every later scripted press landed a frame early. */
     inputs |= TickScript();
     inputs |= debug_server_get_controller_inputs();
+    if (g_mouse_enabled) {
+      /* One latch cycle owns one frame of host motion; sheep-dogging the
+       * absolute pointer position as a delta keeps it immune to pointer
+       * warps and to SDL_GetMouseState being queried mid-run. */
+      int x = 0, y = 0;
+      uint32 buttons = SDL_GetMouseState(&x, &y);
+      joypad_set_mouse(1, x - g_mouse_last_x, y - g_mouse_last_y,
+                       (buttons & SDL_BUTTON_LMASK) != 0,
+                       (buttons & SDL_BUTTON_RMASK) != 0);
+      g_mouse_last_x = x;
+      g_mouse_last_y = y;
+    }
+    if (g_pad_probe && (frameCtr & 0x3f) == 0) {
+      fprintf(stderr,
+              "[padprobe] frame=%u p0 reads=%u maxshift=%u auto=%u "
+              "p1 reads=%u maxshift=%u auto=%u p1w=%04x\n",
+              frameCtr, joypad_read_count(0), joypad_max_shift(0),
+              joypad_auto_read_count(0), joypad_read_count(1),
+              joypad_max_shift(1), joypad_auto_read_count(1),
+              joypad_auto_word_visible(1, 0));
+    }
     g_profile_frame = frameCtr + 1;
     if (profile_requested && !g_profile && g_profile_frame >= profile_first) {
       g_profile = true;

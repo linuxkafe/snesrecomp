@@ -197,6 +197,14 @@ echo "=== Super Multitap protocol ==="
     -o "$OUT/multitap_test"
 "$OUT/multitap_test"
 
+echo "=== SNES Mouse (bsnes protocol) on a controller port ==="
+"$CC" -std=c11 -Wall -Wextra -Werror -O1 \
+    -I "$ROOT/runner/src" -I "$ROOT/runner/src/snes" \
+    "$ROOT/tests/joypad/mouse_joypad_test.c" \
+    "$ROOT/runner/src/snes/joypad.c" \
+    -o "$OUT/mouse_joypad_test"
+"$OUT/mouse_joypad_test"
+
 echo "=== runtime dispatch ==="
 "$CC" -std=c11 -Wall -Wextra -ffunction-sections -fdata-sections \
     -I "$ROOT/runner/src" -I "$ROOT/runner/src/snes" \

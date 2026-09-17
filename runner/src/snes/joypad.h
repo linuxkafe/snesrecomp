@@ -65,6 +65,46 @@ int  joypad_get_multitap(int port);
 /* Highest logical pad the current port configuration can reach: 2, 5, or 8. */
 int  joypad_player_count(void);
 
+/*
+ * SNES Mouse (peripheral) plugged into a controller port.
+ *
+ * Unlike the multitap a mouse is a DEVICE on the port's Data1 line, not a
+ * logical pad seat, and a game reads it the same way it reads a controller:
+ * strobe the port, then shift out. The wire protocol is the reference
+ * emulator's (bsnes sfc/controller/mouse/mouse.cpp): 32 data bits instead of
+ * 16, a 0001 device signature in bits 12-15 (a pad's is 0000), two speed bits
+ * that cycle while the strobe is held and scale the movement read-out, and
+ * sign+magnitude movement for each axis. Reads past bit 31 report a connected
+ * device (1), as a pad does past bit 15. Data2 carries nothing.
+ *
+ * Host input: the host feeds per-frame motion/buttons with joypad_set_mouse;
+ * deltas accumulate until the strobe's FALLING edge latches them (the point
+ * where the guest is actually reading), so a frozen guest never loses input
+ * and a held strobe never re-consumes the same motion more than once.
+ *
+ * A mouse and a multitap on the same physical port are mutually exclusive —
+ * the later configuration wins. Enablement is host setup (like the tap), so
+ * joypad_reset_state keeps the device in place.
+ */
+#define KJOY_DEV_PAD 0
+#define KJOY_DEV_MOUSE 1
+
+void joypad_set_device(int port, int device);
+int  joypad_get_device(int port);
+/* Feed one frame of host motion (screen pixels, right/up positive) and
+ * buttons (left/right physical). Returns 1 if accepted, 0 if the port has no
+ * mouse plugged in. Deltas saturate at 127 so a burst cannot overflow. */
+int  joypad_set_mouse(int port, int dx, int dy, int left, int right);
+
+/* Read diagnostics for the SNESRECOMP_PAD_PROBE host knob: how many manual
+ * reads the guest has made on a port since the device was configured, and the
+ * deepest shift position those reads reached (0 when nothing read it). A game
+ * driving a mouse shifts past 24; a pad game stops at 16. */
+uint32_t joypad_read_count(int port);
+uint8_t  joypad_max_shift(int port);
+uint32_t joypad_auto_read_count(int port);
+uint16_t joypad_auto_word_visible(int port, int data_line);
+
 /* $4201 IOBit outputs: bit 6 -> port 1, bit 7 -> port 2. */
 void joypad_write_iobit(struct Snes *snes, uint8_t wrio);
 /* $4213 readback of the same lines. */
