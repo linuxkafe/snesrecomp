@@ -38,8 +38,11 @@ void cpu_set_stage_window_store_hook(CpuStageWindowStoreHook hook);
  * Returns -1 when the address is not WRAM. Keep every runtime observer on
  * this helper so tracing and memory access cannot disagree about aliases. */
 static inline int32_t cpu_wram_offset(uint8 bank, uint16 addr) {
-    if (bank == 0x7E) return (int32_t)addr;
-    if (bank == 0x7F) return 0x10000 + (int32_t)addr;
+    /* $FE/$FF mirror $7E/$7F on the SNES system map (real hardware reads and
+     * writes the same WRAM bytes); without them city data living in high WRAM
+     * banks is misread through RomPtr as ROM and writes are dropped. */
+    if (bank == 0x7E || bank == 0xFE) return (int32_t)addr;
+    if (bank == 0x7F || bank == 0xFF) return 0x10000 + (int32_t)addr;
     if (addr < 0x2000 &&
         (bank <= 0x3F || (bank >= 0x80 && bank <= 0xBF))) {
         return (int32_t)addr;

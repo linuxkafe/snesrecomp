@@ -150,7 +150,8 @@ uint8_t *cart_getRomPtr(Cart *cart, uint8_t bank, uint16_t adr) {
       uint8_t canonical = bank & 0x7f;
       if (adr < 0x8000 && canonical < 0x40) return NULL;
       off = ((uint32_t)canonical << 15) | (adr & 0x7fff);
-      if (off >= cart->romSize) return NULL;
+      /* EXPERIMENT T046: LoROM chip mirrors modulo romSize (bsnes/ares). */
+      off = off % cart->romSize;
       break;
     }
     case CART_DSP1: {
