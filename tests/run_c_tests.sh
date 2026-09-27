@@ -223,6 +223,14 @@ echo "=== soft mouse (host pointer -> guest d-pad cursor) ==="
     -o "$OUT/soft_mouse_test"
 "$OUT/soft_mouse_test"
 
+echo "=== configuration bar (layout + click mapping) ==="
+"$CC" -std=c11 -Wall -Wextra -Werror -O1 \
+    -I "$ROOT/runner/src" -I "$ROOT/runner/src/desktop" \
+    "$ROOT/tests/host/config_bar_test.c" \
+    "$ROOT/runner/src/snes_config_bar.c" \
+    -o "$OUT/config_bar_test"
+"$OUT/config_bar_test"
+
 echo "=== runtime dispatch ==="
 "$CC" -std=c11 -Wall -Wextra -ffunction-sections -fdata-sections \
     -I "$ROOT/runner/src" -I "$ROOT/runner/src/snes" \

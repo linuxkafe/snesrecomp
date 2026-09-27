@@ -71,6 +71,7 @@
 #include "snes_savestate_menu.h"
 #include "snes_rewind.h"
 #include "snes_overlay_draw.h"
+#include "snes_config_bar.h"
 #include "snes_osd.h"
 #include "snes_runahead.h"
 
@@ -968,6 +969,160 @@ void RtlDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
  * at half size here and the SDL/GL scale brings it back. Window-space chrome
  * is not available through the RendererFuncs contract, which is what the GL
  * presenter speaks. */
+/* ---- configuration bar ---------------------------------------------------
+ * The bar is up by default and shows what the configuration IS. It applies
+ * changes through these hooks, because the things it changes (a window, a
+ * renderer, a volume) live as statics in this file and the bar must not know
+ * their names. A NULL hook leaves the rows that need it greyed with RESTART
+ * rather than pretending to work. */
+static void Bar_SetPause(void)         { HandleCommand(kKeys_Pause, true); }
+static void Bar_SetStates(void)        { g_savestate_menu_hotkey = 1; }
+static void Bar_SetRewind(void)        { g_rewind_hotkey = 1; }
+static void Bar_SetScreenshot(void)    { RequestScreenshot(); }
+static void Bar_SetPerf(void)          { snes_osd_toggle_fps(); }
+
+static SDL_Rect g_sdl_present_rect;
+static SDL_Rect g_sdl_renderer_rect;
+
+/* Window -> frame. The presenter maps the frame rect onto the present rect, so
+ * the inverse is exact and needs no hard-coded margins -- which matters,
+ * because the SimCity host pillarboxes and a guessed mapping would put the
+ * buttons somewhere the click never lands. */
+static bool WindowToFrame(int wx, int wy, int *fx, int *fy) {
+  int pw = g_sdl_present_rect.w, ph = g_sdl_present_rect.h;
+  if (pw <= 0 || ph <= 0 || g_sdl_renderer_rect.w <= 0 || g_sdl_renderer_rect.h <= 0)
+    return false;
+  *fx = g_sdl_renderer_rect.x + (wx - g_sdl_present_rect.x) * g_sdl_renderer_rect.w / pw;
+  *fy = g_sdl_renderer_rect.y + (wy - g_sdl_present_rect.y) * g_sdl_renderer_rect.h / ph;
+  return true;
+}
+
+static uint32 OverlayNavInputs(void);
+
+/* Nav for the always-up bar. Edge-triggered with an auto-repeat, because the
+ * list is longer than the panel and a single press per key would make the
+ * bottom of it unreachable without a lot of tapping. The repeat clock is the
+ * host's, not the guest's: this is host chrome, and it must keep working
+ * while the guest is paused. */
+static void ConfigBarNav(uint32_t now) {
+  static uint32 held;
+  static uint32 next_fire;
+  const uint32 dir_mask = SNES_PAD_UP | SNES_PAD_DOWN | SNES_PAD_LEFT | SNES_PAD_RIGHT;
+  const uint32 delay_ms = 400, repeat_ms = 90;
+  uint32 v, pressed, dir;
+  int move = 0, change = 0;
+
+  v = OverlayNavInputs();
+  pressed = v & ~held;
+  held = v;
+
+  if (!snes_config_bar_expanded()) return;
+
+  dir = v & dir_mask;
+  if (pressed & dir_mask) {
+    next_fire = now + delay_ms;          /* fire now, then start repeating */
+  } else if (dir && (int32_t)(now - next_fire) >= 0) {
+    next_fire = now + repeat_ms;
+  } else {
+    return;                              /* held, but still inside the delay */
+  }
+
+  if (dir & SNES_PAD_DOWN)       move = +1;
+  else if (dir & SNES_PAD_UP)    move = -1;
+  else if (dir & SNES_PAD_RIGHT) change = +1;
+  else if (dir & SNES_PAD_LEFT)  change = -1;
+  else return;
+
+  if (move) snes_config_bar_move(move);
+  if (change) snes_config_bar_step_row(snes_config_bar_selected(), change);
+}
+
+/* The bar's view of g_config. One switch, in index order, so the mapping is
+ * auditable in a single place instead of spread over thirty callbacks. */
+static int ConfigBarGet(int idx) {
+  switch (idx) {
+    case 0:  return g_config.widescreen;
+    case 1:  return g_config.window_scale;
+    case 2:  return g_config.display_aspect;
+    case 3:  return g_config.renderer[0] ? 1 : 0;
+    case 4:  return g_config.shader ? 1 : 0;
+    case 5:  return g_config.linear_filtering;
+    case 6:  return g_config.no_sprite_limits;
+    case 7:  return g_config.frame_blend;
+    case 8:  return g_config.vsync;
+    case 9:  return g_config.fullscreen;
+    case 10: return g_config.ignore_aspect_ratio;
+    case 11: return g_config.new_renderer;
+    case 12: return g_config.volume;
+    case 13: return g_config.enable_audio;
+    case 14: return g_config.audio_freq;
+    case 15: return g_config.audio_samples;
+    case 16: return g_config.audio_channels;
+    case 17: return g_config.output_method;
+    case 18: return g_config.run_ahead;
+    case 19: return g_config.disable_frame_delay;
+    case 20: return g_config.rewind_gesture[0] ? 1 : 0;
+    case 21: return g_config.autosave;
+    case 22: return g_config.display_perf_title;
+    case 23: return g_config.skip_launcher;
+    case 24: return g_config.netplay_player_name[0] ? 1 : 0;
+    case 25: return g_config.gamepad_deadzone;
+    case 26: return g_config.player_src[0];
+    case 27: return g_config.player_src[1];
+    case 28: return g_config.enable_gamepad[0];
+    case 29: return g_config.enable_gamepad[1];
+    default: return 0;
+  }
+}
+
+static void ConfigBarSet(int idx, int v) {
+  switch (idx) {
+    case 0:  snesrecomp_desktop_set_widescreen(v); break;
+    case 1:  ChangeWindowScale(v - g_config.window_scale); break;
+    case 2:  g_config.display_aspect = (uint8_t)v; break;
+    case 3:  RendererApply(v); break;
+    case 5:  g_config.linear_filtering = v; break;
+    case 6:  g_config.no_sprite_limits = v; break;
+    case 7:  g_config.frame_blend = v; FrameBlendConfigure(); break;
+    case 8:  g_config.vsync = v; break;
+    case 12: HandleVolumeAdjustment(v > g_config.volume ? 1 : -1); break;
+    case 18: g_config.run_ahead = v; break;
+    case 19: g_config.disable_frame_delay = v; break;
+    case 23: g_config.skip_launcher = v; break;
+    case 25: g_config.gamepad_deadzone = v; break;
+    default: break;   /* the bar never offers a restart-only row for editing */
+  }
+}
+
+static void ConfigBarInit(void) {
+  SnesConfigBarHooks h;
+  memset(&h, 0, sizeof(h));
+  h.set_display_perf = Bar_SetPerf;
+  snes_config_bar_init(&h, ConfigBarGet, ConfigBarSet);
+}
+
+/* Run a click that landed on the bar. Returns true when the bar consumed it,
+ * which is the host's cue to leave the click out of the guest. */
+static bool ConfigBarClick(int frame_x, int frame_y) {
+  SnesConfigBarAction a = snes_config_bar_click(frame_x, frame_y);
+  int row;
+  switch (a) {
+    case kCfgAct_Pause:      Bar_SetPause(); return true;
+    case kCfgAct_VolDown:    HandleVolumeAdjustment(-1); return true;
+    case kCfgAct_VolUp:      HandleVolumeAdjustment(+1); return true;
+    case kCfgAct_States:     Bar_SetStates(); return true;
+    case kCfgAct_Rewind:     Bar_SetRewind(); return true;
+    case kCfgAct_Screenshot: Bar_SetScreenshot(); return true;
+    case kCfgAct_Perf:       Bar_SetPerf(); return true;
+    case kCfgAct_ToggleExpand: snes_config_bar_toggle_expanded(); return true;
+    case kCfgAct_Select:
+      row = snes_config_bar_row_at(frame_x, frame_y);
+      if (row >= 0) { snes_config_bar_select_row(row); snes_config_bar_step_row(row, +1); }
+      return true;
+    default: return false;
+  }
+}
+
 static void ComposeOsd(uint8 *dst, int pitch, int dst_w, int dst_h, int scale_div) {
   const uint32_t *px = NULL;
   int w = 0, h = 0;
@@ -1125,6 +1280,8 @@ static void DrawPpuFrameWithPerf(void) {
   }
   ComposeOsd(pixel_buffer, pitch, g_snes_width * render_scale,
              g_snes_height * render_scale, 2);
+  snes_config_bar_draw(pixel_buffer, pitch, g_snes_width * render_scale,
+                       g_snes_height * render_scale);
   /* SNESRECOMP_SCREENSHOT=<path.ppm> [SNESRECOMP_SCREENSHOT_FRAME=<n>]: write
    * the frame presented at simulated frame n (default: the first) as a PPM,
    * OSD included: it is what the player sees, not the bare field.
@@ -2286,6 +2443,7 @@ int snesrecomp_desktop_main(const SnesDesktopHostGame *game, int argc, char **ar
   }
   if (game->after_config) game->after_config();
   ApplyVolume();
+  ConfigBarInit();
   /* SNESRECOMP_KEYMAP_DUMP=1: what the system hotkeys resolved to, for a
    * headless check that a binding really is bound (a config.ini beside the
    * executable can say something other than the repository's). */
@@ -2780,7 +2938,8 @@ error_reading:;
       g_mouse_enabled = true;
       /* Anchor the delta track so frame 1 does not inherit the desktop
        * cursor's absolute position as an enormous first motion. */
-      SDL_GetMouseState(&g_mouse_last_x, &g_mouse_last_y);
+      { float ax = 0.0f, ay = 0.0f; SDL_GetMouseState(&ax, &ay);
+        g_mouse_last_x = (int)ax; g_mouse_last_y = (int)ay; }
       snesrecomp_sdl_show_cursor(false);
       host_report_breadcrumb("SNES Mouse enabled on port 2 (player 2)");
     }
@@ -3058,7 +3217,13 @@ error_reading:;
         if (SDL_GetModState() & KMOD_CTRL && event.wheel.y != 0)
           ChangeWindowScale(event.wheel.y > 0 ? 1 : -1);
         break;
-      case SDL_MOUSEBUTTONDOWN:
+      case SDL_MOUSEBUTTONDOWN: {
+        /* A click on the bar belongs to the bar. It must not also reach the
+         * guest, or pressing Pause with the mouse would pause AND tap A. */
+        int fx, fy;
+        if (WindowToFrame((int)event.button.x, (int)event.button.y, &fx, &fy) &&
+            ConfigBarClick(fx, fy))
+          break;
         if (event.button.button == SDL_BUTTON_LEFT && event.button.clicks == 2) {
           if ((g_win_flags & SNESRECOMP_SDL_WINDOW_FULLSCREEN_DESKTOP) == 0 && (g_win_flags & SDL_WINDOW_FULLSCREEN) == 0 && SDL_GetModState() & KMOD_SHIFT) {
             g_win_flags ^= SDL_WINDOW_BORDERLESS;
@@ -3066,7 +3231,15 @@ error_reading:;
           }
         }
         break;
+      }
       case SDL_KEYDOWN:
+        /* F1 is the bar's own key and is NOT a rebindable command: it is read
+         * as a raw keycode so it works before a config.ini exists, which is
+         * exactly when a user needs to see the configuration. */
+        if (SNESRECOMP_SDL_EVENT_KEY(event) == SDLK_F1) {
+          snes_config_bar_toggle_expanded();
+          break;
+        }
         HandleInput(SNESRECOMP_SDL_EVENT_KEY(event),
                     SNESRECOMP_SDL_EVENT_MOD(event), true);
         break;
@@ -3083,6 +3256,7 @@ error_reading:;
     if (!running)
       break;
     OverlaySelftestPadMainTick(frameCtr);
+    ConfigBarNav(SDL_GetTicks());
     /* SNESRECOMP_VOLUME_DEMO=<frame>: press VolumeDown once at that frame, so
      * a headless screenshot can show the bar. */
     {
@@ -3386,8 +3560,10 @@ error_reading:;
       /* One latch cycle owns one frame of host motion; sheep-dogging the
        * absolute pointer position as a delta keeps it immune to pointer
        * warps and to SDL_GetMouseState being queried mid-run. */
-      int x = 0, y = 0;
-      uint32 buttons = SDL_GetMouseState(&x, &y);
+      float xf = 0.0f, yf = 0.0f;
+      int x, y;
+      uint32 buttons = SDL_GetMouseState(&xf, &yf);
+      x = (int)xf; y = (int)yf;
       joypad_set_mouse(1, x - g_mouse_last_x, y - g_mouse_last_y,
                        (buttons & SDL_BUTTON_LMASK) != 0,
                        (buttons & SDL_BUTTON_RMASK) != 0);
