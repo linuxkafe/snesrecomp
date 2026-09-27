@@ -260,6 +260,7 @@ static int g_soft_mouse_pulse;       /* frames each press is held */
  * off would couple two things that have no reason to be coupled. */
 static int g_soft_mouse_last_x, g_soft_mouse_last_y;
 static int g_soft_mouse_primed;
+static int g_soft_mouse_warps;
 static int g_soft_mouse_log_shown;
 static unsigned long g_soft_mouse_pulses;
 
@@ -3549,8 +3550,14 @@ error_reading:;
         g_soft_mouse_last_x = mx;
         g_soft_mouse_last_y = my;
       }
-      if (dx > 1000 || dx < -1000 || dy > 1000 || dy < -1000) {
+      /* A plausible one-frame drag, not a generous one. The old 1000px guard
+       * never fired in the case that mattered: the window appearing moved the
+       * pointer 469px, which is under the guard and so arrived as real motion.
+       * Nothing a hand does in 16ms covers 250px. Re-anchor, so what follows
+       * the teleport is measured from where the pointer ended up. */
+      if (dx > 250 || dx < -250 || dy > 250 || dy < -250) {
         joypad_soft_mouse_reset(&g_soft_mouse);
+        g_soft_mouse_warps++;
         dx = dy = 0;
       }
       uint16 bits = 0;
@@ -3565,13 +3572,23 @@ error_reading:;
        * identical from the window. */
       if (HostGetenv("SOFT_MOUSE_LOG")) {
         extern int snes_frame_counter;
+        /* A button edge is logged even when no motion happened, because
+         * "the click does nothing" and "the click fired" look identical from
+         * the window, and left->A / right->B is a claim that has to be
+         * checkable rather than asserted. SM_A is 0x0100, SM_B is 0x0001. */
+        if ((bits & (0x0100u | 0x0001u)) && g_soft_mouse_log_shown < 8) {
+          g_soft_mouse_log_shown++;
+          fprintf(stderr, "[softmouse] f=%d CLICK %s\n", snes_frame_counter,
+                  (bits & 0x0100u) ? ((bits & 0x0001u) ? "A+B" : "A")
+                                   : "B");
+        }
         if (bits && g_soft_mouse_log_shown < 8) {
           g_soft_mouse_log_shown++;
           fprintf(stderr, "[softmouse] f=%d dx=%+d dy=%+d bits=%04X\n",
                   snes_frame_counter, dx, dy, bits);
         } else if (bits && (snes_frame_counter % 120) == 0) {
-          fprintf(stderr, "[softmouse] f=%d ... pulses=%lu\n",
-                  snes_frame_counter, g_soft_mouse_pulses);
+          fprintf(stderr, "[softmouse] f=%d ... pulses=%lu warps=%d\n",
+                  snes_frame_counter, g_soft_mouse_pulses, g_soft_mouse_warps);
         }
         if (bits)
           g_soft_mouse_pulses++;

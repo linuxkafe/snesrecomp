@@ -256,7 +256,6 @@ void joypad_soft_mouse_reset(SoftMouseState *st) {
 #define SM_RIGHT 0x0080u
 /* Far enough past any real drag that only a warp reaches it, and small
  * enough that a day-long drag cannot reach it either. */
-#define kSmAccMax 1000000
 
 #define SM_A     0x0100u
 #define SM_B     0x0001u
@@ -298,13 +297,26 @@ int joypad_soft_mouse_map(SoftMouseState *st, int dx, int dy, int left,
     } else {
         /* Accumulate in 32 bits and saturate. Narrowing BEFORE the clamp is
          * the bug this replaces: (int16_t)(0 + 40000) is negative, so a warp
-         * arrived as motion to the left. */
+         * arrived as motion to the left.
+         *
+         * The bound is TWO thresholds, not a large constant, and that is the
+         * whole point of this revision. The accumulator's only legitimate job
+         * is catching SUB-threshold motion so a slow drag still moves the
+         * cursor; a backlog has no legitimate use. With a bound of a million
+         * pixels, a measured 469px window-appearing teleport queued 117
+         * presses, which then drained at one press per pulse - about four
+         * seconds of cursor drift nobody asked for. Bounding to two thresholds
+         * means a teleport can never queue more than two stray presses, while
+         * a genuine slow drag, which never exceeds one pixel per frame, is
+         * unaffected. It also costs no speed: a pulse occupies pulse_frames
+         * frames, so the ceiling was already about half a press per frame. */
+        int32_t bound = (int32_t)threshold * 2;
         int32_t ax = st->acc_x + dx;
         int32_t ay = st->acc_y + dy;
-        if (ax >  kSmAccMax) ax = kSmAccMax;
-        if (ax < -kSmAccMax) ax = -kSmAccMax;
-        if (ay >  kSmAccMax) ay = kSmAccMax;
-        if (ay < -kSmAccMax) ay = -kSmAccMax;
+        if (ax >  bound) ax =  bound;
+        if (ax < -bound) ax = -bound;
+        if (ay >  bound) ay =  bound;
+        if (ay < -bound) ay = -bound;
 
         /* dy arrives in SCREEN space, where +y is DOWN; the d-pad's +y is UP.
          * Without the negation, pushing the pointer down drove the cursor up.
