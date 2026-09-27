@@ -258,6 +258,8 @@ static int g_soft_mouse_pulse;       /* frames each press is held */
  * motion either way, and sharing one cursor with a feature that is usually
  * off would couple two things that have no reason to be coupled. */
 static int g_soft_mouse_last_x, g_soft_mouse_last_y;
+static int g_soft_mouse_log_shown;
+static unsigned long g_soft_mouse_pulses;
 
 static int env_int_or(const char *name, int fallback) {
   const char *v = HostGetenv(name);
@@ -3362,6 +3364,23 @@ error_reading:;
                             (mb & SDL_BUTTON_RMASK) != 0,
                             g_soft_mouse_threshold, g_soft_mouse_pulse, &bits);
       inputs |= bits;
+      /* SNESRECOMP_SOFT_MOUSE_LOG=1: one line on the first pulses, then every
+       * 120 frames. Without it there is no way to tell "the pointer never
+       * moved" from "pulses fired and the guest ignored them" - the two look
+       * identical from the window. */
+      if (HostGetenv("SOFT_MOUSE_LOG")) {
+        extern int snes_frame_counter;
+        if (bits && g_soft_mouse_log_shown < 8) {
+          g_soft_mouse_log_shown++;
+          fprintf(stderr, "[softmouse] f=%d dx=%+d dy=%+d bits=%04X\n",
+                  snes_frame_counter, dx, dy, bits);
+        } else if (bits && (snes_frame_counter % 120) == 0) {
+          fprintf(stderr, "[softmouse] f=%d ... pulses=%lu\n",
+                  snes_frame_counter, g_soft_mouse_pulses);
+        }
+        if (bits)
+          g_soft_mouse_pulses++;
+      }
     }
     if (g_mouse_enabled) {
       /* One latch cycle owns one frame of host motion; sheep-dogging the
