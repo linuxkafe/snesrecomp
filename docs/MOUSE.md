@@ -11,6 +11,28 @@ The mouse is opt-in (`SNESRECOMP_MOUSE=1`) and plugs into **port 2**, which is
 where the original SimCity mouse software expected it. While on, the host OS
 pointer is hidden so the ROM's own cursor is the only one on screen.
 
+> **Corrected 2026-09-27 — the SimCity sentence above is wrong, and so was
+> the earlier claim that it had "mouse software".** Measured against the ROM
+> (scanning every 3-byte absolute reference, all addressing modes):
+>
+> ```
+> $4218  2 code references   (bank $00:$8710 and the NMI read at $00:928F)
+> $4219  0
+> $421A  0
+> $421B  0
+> ```
+>
+> A SNES Mouse is told apart from a pad by the game reading PAST bit 15, which
+> means reading `$4219`/`$421A`/`$421B`. SimCity reads `$4218` only, and its
+> NMI handler loops four times reading `LDA $4218,X` two bytes at a time —
+> that is two controllers' standard 2-byte pads, not a 32-bit mouse read.
+>
+> **So `SNESRECOMP_MOUSE=1` has no effect on SimCity**: the emulation is
+> correct, the game simply never asks. The peripheral is right; the consumer
+> is absent. Anything mouse-shaped for this title has to be built in the host
+> (mapping the PC pointer onto the guest's own d-pad cursor), not by turning
+> this flag on.
+
 ## 1. Hardware model
 
 A SNES Mouse looks like a controller to the console: it sits on a port's
