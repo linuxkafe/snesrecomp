@@ -2129,6 +2129,12 @@ static void PpuFinishBackgroundOverlay(Ppu *ppu, uint y, bool sub,
 }
 
 static void PpuDrawBackgrounds(Ppu *ppu, int y, bool sub) {
+  /* This function uses PPU_T0/PPU_ACC below (the sprite-draw timing split), so
+   * under a build that enables the phase timers it needs _ppu_t in scope.
+   * Upstream 8d7edca omits this and only compiles in the configurations where
+   * the macros expand to nothing — i.e. it breaks exactly the dev/profiling
+   * build it is meant to serve. Declared here, not as instrumentation. */
+  PPU_T0_DECL
   // Top 4 bits contain the prio level, and bottom 4 bits the layer type.
   // SPRITE_PRIO_TO_PRIO can be used to convert from obj prio to this prio.
   //  15: BG3 tiles with priority 1 if bit 3 of $2105 is set
