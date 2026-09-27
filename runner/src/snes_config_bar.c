@@ -33,6 +33,7 @@
 static SnesConfigBarHooks g_hooks;
 static int (*g_get)(int index);
 static void (*g_set)(int index, int value);
+static const char *(*g_cheat_note)(int cheat_index);
 static int g_expanded;
 static int g_sel;
 static int g_first;
@@ -54,7 +55,12 @@ typedef struct {
 
 static const char *const kAspectNames[]   = { "AUTO", "4:3", "16:9", "16:10" };
 static const char *const kRendererNames[] = { "AUTO", "OPENGL" };
-static const char *const kScaleNames[]    = { "1X", "2X", "3X", "4X", "5X", "6X" };
+/* Up to kMaxWindowScale (10) in host_main.c, not 6. The bar was capping
+ * below the host's own ceiling, so a 4K display - where the host allows
+ * 9x - could not be reached from the bar. The host clamps to the display
+ * regardless; naming the real range is honest, and the row wraps. */
+static const char *const kScaleNames[]    = {
+  "1X","2X","3X","4X","5X","6X","7X","8X","9X","10X" };
 static const char *const kFullNames[]     = { "WINDOW", "FULL", "DESKTOP" };
 
 #define O(sec, key, kind, names, n, mag, lo, hi, ed) \
@@ -79,7 +85,7 @@ static const char *const kFullNames[]     = { "WINDOW", "FULL", "DESKTOP" };
  */
 static Opt g_options[] = {
   O("GRAPHICS", "WIDESCREEN",     kOpt_Bool, NULL,            0, 1, 0, 1, 1),
-  O("GRAPHICS", "WINDOWSCALE",     kOpt_Enum, kScaleNames,     6, 1, 0, 5, 1),
+  O("GRAPHICS", "WINDOWSCALE",     kOpt_Enum, kScaleNames,    10, 1, 0, 9, 1),
   O("GRAPHICS", "DISPLAYASPECT",   kOpt_Enum, kAspectNames,    4, 1, 0, 3, 1),
   O("GRAPHICS", "RENDERER",        kOpt_Enum, kRendererNames,  2, 1, 0, 1, 1),
   O("GRAPHICS", "SHADER",          kOpt_Bool, NULL,            0, 1, 0, 1, 0),
@@ -112,6 +118,17 @@ static Opt g_options[] = {
   O("CONTROLLER", "SOURCEP2",      kOpt_Int,  NULL,            0, 1, 0, 2, 0),
   O("CONTROLLER", "GAMEPADP1",      kOpt_Bool, NULL,            0, 1, 0, 1, 0),
   O("CONTROLLER", "GAMEPADP2",      kOpt_Bool, NULL,            0, 1, 0, 1, 0),
+
+  /* The cheats. Present, not hidden: a bar that omitted five toggles the
+   * player was told about would read as broken. The address status travels
+   * with the value, because "OFF" and "cannot work yet" are different facts
+   * and a toggle that silently does nothing is the failure mode worth
+   * engineering against. */
+  O("CHEATS", "INFINITE MONEY",     kOpt_Bool, NULL,            0, 1, 0, 1, 1),
+  O("CHEATS", "SPECIAL BLDGS",      kOpt_Bool, NULL,            0, 1, 0, 1, 1),
+  O("CHEATS", "NO POLLUTION",       kOpt_Bool, NULL,            0, 1, 0, 1, 1),
+  O("CHEATS", "NO CRIME",           kOpt_Bool, NULL,            0, 1, 0, 1, 1),
+  O("CHEATS", "NO TRAFFIC",         kOpt_Bool, NULL,            0, 1, 0, 1, 1),
 };
 static const int g_option_count = (int)(sizeof(g_options) / sizeof(g_options[0]));
 
@@ -158,6 +175,10 @@ static void opt_value_str(const Opt *o, int idx, char *out) {
   put_int(out, &c, v);
 }
 
+void snes_config_bar_set_cheat_note(const char *(*note)(int cheat_index)) {
+  g_cheat_note = note;
+}
+
 void snes_config_bar_init(const SnesConfigBarHooks *hooks,
                           int (*get_value)(int index),
                           void (*set_value)(int index, int value)) {
@@ -171,8 +192,20 @@ void snes_config_bar_init(const SnesConfigBarHooks *hooks,
   e = getenv("SNESRECOMP_CONFIG_BAR");
   g_expanded = (e && *e == '1') ? 1 : 0;
   g_sel = 0;
+  /* SNESRECOMP_CONFIG_BAR_SEL=<n>: start the selection on row n. The bar's nav
+   * reads the real keyboard, which a headless run has no way to press, so
+   * without this the lower sections are unreachable in a screenshot and would
+   * only ever be verified by reading the source. */
   g_first = 0;
   g_layout_w = 0;
+  /* AFTER the g_first reset, not before: the original reset sat on the next
+   * line and silently undid this, which is why a selection of 31 still
+   * rendered from the top of the list. */
+  e = getenv("SNESRECOMP_CONFIG_BAR_SEL");
+  if (e) {
+    int n = atoi(e);
+    if (n >= 0 && n < g_option_count) { g_sel = n; g_first = n; }
+  }
 }
 
 void snes_config_bar_toggle_expanded(void) { g_expanded = !g_expanded; }
@@ -236,8 +269,9 @@ static void summary_line(char *out) {
   out[0] = 0;
   put(out, &c, "SCALE ");
   {
-    int s = opt_value(1);
-    if (s > 0) { out[c++] = (char)('0' + clampi(s, 0, 9)); out[c] = 0; }
+    int s = clampi(opt_value(1), 0, 10);
+    if (s >= 10) { out[c++] = '1'; out[c++] = '0'; out[c] = 0; }
+    else if (s > 0) { out[c++] = (char)('0' + s); out[c] = 0; }
   }
   put(out, &c, "  ASPECT ");
   opt_value_str(&g_options[2], 2, v);
@@ -342,6 +376,13 @@ void snes_config_bar_draw(uint8_t *dst, int pitch, int dst_w, int dst_h) {
         opt_value_str(o, idx, v);
         put(line, &c, v);
         if (!o->editable) put(line, &c, "  RESTART");
+        else if (idx >= 30) {
+          /* A cheat row: append the address status. The bar does not link
+           * against snes_cheats, so the host supplies this string through the
+           * optional cheat_note hook; a NULL hook leaves the row alone. */
+          const char *note = g_cheat_note ? g_cheat_note((int)idx - 30) : 0;
+          if (note) { line[c] = ' '; line[c] = 0; put(line, &c, note); }
+        }
 
         if ((int)strlen(line) > pw / FONT_W - 1) line[pw / FONT_W - 1] = 0;
         snes_ovl_draw_text(px, dst_w, dst_h, px0 + 3, y, line,

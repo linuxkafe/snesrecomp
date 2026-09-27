@@ -78,6 +78,10 @@ typedef struct {
  * key moved. The host passes the current value of option `index` through
  * get_value and stores a new one through set_value; the option TABLE below is
  * the bar's, and the VALUES are the host's. */
+/* Optional: a short status string for a cheat row ("NO ADDR" while the
+ * address is unlocated). NULL leaves cheat rows showing just their value. */
+void snes_config_bar_set_cheat_note(const char *(*note)(int cheat_index));
+
 void snes_config_bar_init(const SnesConfigBarHooks *hooks,
                           int (*get_value)(int index),
                           void (*set_value)(int index, int value));

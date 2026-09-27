@@ -72,6 +72,7 @@
 #include "snes_rewind.h"
 #include "snes_overlay_draw.h"
 #include "snes_config_bar.h"
+#include "snes_cheats.h"
 #include "snes_osd.h"
 #include "snes_runahead.h"
 
@@ -1077,6 +1078,13 @@ static int ConfigBarGet(int idx) {
     case 27: return g_config.player_src[1];
     case 28: return g_config.enable_gamepad[0];
     case 29: return g_config.enable_gamepad[1];
+    /* Rows 30..34 are the cheats. They sit in the same bar because the player
+     * looks in ONE place to find out what a setting is, and a second surface
+     * for five toggles would be one more place to look. Row N maps to cheat
+     * N-30, and the cheat refuses to arm while its address is unverified - so
+     * a row can read ON only for a cheat that is known to work. */
+    case 30: case 31: case 32: case 33: case 34:
+      return snes_cheat_is_armed((int)idx - 30);
     default: return 0;
   }
 }
@@ -1096,14 +1104,32 @@ static void ConfigBarSet(int idx, int v) {
     case 19: g_config.disable_frame_delay = v; break;
     case 23: g_config.skip_launcher = v; break;
     case 25: g_config.gamepad_deadzone = v; break;
+    case 30: case 31: case 32: case 33: case 34:
+      snes_cheat_apply((int)idx - 30, v ? 1 : 0);
+      break;
     default: break;   /* the bar never offers a restart-only row for editing */
   }
+}
+
+static const char *ConfigBarCheatNote(int cheat_index) {
+  const SnesCheat *c = snes_cheat_at(cheat_index);
+  if (!c) return 0;
+  if (c->verified) return "  ON";
+  return "  NO ADDR";
+}
+
+static void CheatsInitFromConfig(void) {
+  /* Deliberately does nothing yet. Arming a cheat here would need a
+   * [Cheats] section in config.ini, and persisting a toggle for a cheat that
+   * cannot arm would write a setting that does nothing. The config keys
+   * arrive with the first verified address, not before. */
 }
 
 static void ConfigBarInit(void) {
   SnesConfigBarHooks h;
   memset(&h, 0, sizeof(h));
   h.set_display_perf = Bar_SetPerf;
+  snes_config_bar_set_cheat_note(ConfigBarCheatNote);
   snes_config_bar_init(&h, ConfigBarGet, ConfigBarSet);
 }
 
@@ -2519,6 +2545,7 @@ int snesrecomp_desktop_main(const SnesDesktopHostGame *game, int argc, char **ar
   if (game->after_config) game->after_config();
   ApplyVolume();
   ConfigBarInit();
+  CheatsInitFromConfig();
   /* SNESRECOMP_KEYMAP_DUMP=1: what the system hotkeys resolved to, for a
    * headless check that a binding really is bound (a config.ini beside the
    * executable can say something other than the repository's). */
@@ -3589,6 +3616,7 @@ error_reading:;
      * without running a frame. Ticked above the overlay checks, an
      * iteration that opened a panel consumed a script frame the guest never
      * saw, and every later scripted press landed a frame early. */
+    snes_cheats_frame();
     inputs |= TickScript();
     inputs |= debug_server_get_controller_inputs();
     if (g_soft_mouse_enabled) {

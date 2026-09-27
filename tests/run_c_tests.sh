@@ -231,6 +231,14 @@ echo "=== configuration bar (layout + click mapping) ==="
     -o "$OUT/config_bar_test"
 "$OUT/config_bar_test"
 
+echo "=== cheats (hold a WRAM value; refuse an unlocated address) ==="
+"$CC" -std=c11 -Wall -Wextra -Werror -O1 \
+    -I "$ROOT/runner/src" \
+    "$ROOT/tests/host/cheats_test.c" \
+    "$ROOT/runner/src/snes_cheats.c" \
+    -o "$OUT/cheats_test"
+"$OUT/cheats_test"
+
 echo "=== runtime dispatch ==="
 "$CC" -std=c11 -Wall -Wextra -ffunction-sections -fdata-sections \
     -I "$ROOT/runner/src" -I "$ROOT/runner/src/snes" \
