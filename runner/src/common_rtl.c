@@ -1400,6 +1400,19 @@ void WriteReg(uint16 reg, uint8 value) {
     cart_sync_coprocessors(g_snes->cart, g_cpu.master_cycles);
     cart_write(g_snes->cart, 0, reg, value);
   } else if (reg >= 0x2100 && reg < 0x2140) {
+    if (reg == 0x2100) {
+      /* T050-observe: env-gated stream of INIDISP writes ($2100). */
+      extern int snes_frame_counter;
+      extern const char *g_last_recomp_func;
+      extern uint32_t g_interp_wlog_pc24;
+      static int s_tr2100 = -1;
+      if (s_tr2100 < 0) { const char *v = getenv("SNESRECOMP_TRACE2100"); s_tr2100 = (v && v[0] && v[0] != '0'); }
+      if (s_tr2100)
+        fprintf(stderr, "[wr2100] f%d $2100=%02X func=%s interp=%06X\n",
+                snes_frame_counter, value,
+                g_last_recomp_func ? g_last_recomp_func : "<none>",
+                (unsigned)g_interp_wlog_pc24);
+    }
     ppu_write(g_ppu, reg & 0xff, value);
     if (g_snes)
       ppu_rasterRecord(reg, g_snes->vPos, value);
@@ -2388,8 +2401,13 @@ void RtlWriteSram(void) {
 static const uint8 *SimpleHdma_GetPtr(uint32 p) {
   uint8 bank = (uint8)(p >> 16);
   uint16 addr = (uint16)(p & 0xffff);
-  if (bank == 0x7E) return g_ram + addr;
-  if (bank == 0x7F) return g_ram + 0x10000 + addr;
+  /* $FE/$FF mirror $7E/$7F on the SNES system map. cpu_wram_offset (the CPU
+   * data path) learned this in T046; without it here an HDMA table whose
+   * source address lives in a high WRAM bank resolves through RomPtr and
+   * transfers ROM bytes into a PPU register. Same bus-modelling class, same
+   * fix — see aes/tickets/T047. */
+  if (bank == 0x7E || bank == 0xFE) return g_ram + addr;
+  if (bank == 0x7F || bank == 0xFF) return g_ram + 0x10000 + addr;
   if ((bank < 0x40 || (bank >= 0x80 && bank < 0xC0)) && addr < 0x2000)
     return g_ram + addr;
   /* ROM address: validate against ROM size to avoid off-rails reads

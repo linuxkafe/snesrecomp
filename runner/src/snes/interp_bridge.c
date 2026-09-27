@@ -842,7 +842,7 @@ static long interp_step_cap(void) {
 /* Opt-in diagnostic (SNESRECOMP_INTERP_TRACE=1): on a step-cap BAIL, dump the
  * entry path + the loop the interpreter was stuck in, so we can classify a
  * bail as hardware-wait spin vs wrong-target vs mis-decode. Off by default. */
-typedef struct { uint32_t pc; uint8_t op; } ITraceEnt;
+typedef struct { uint32_t pc; uint8_t op; uint16_t sp; } ITraceEnt;
 static int itrace_enabled(void) {
     static int v = -1;
     if (v < 0) v = getenv("SNESRECOMP_INTERP_TRACE") ? 1 : 0;
@@ -854,13 +854,23 @@ static void itrace_dump(uint32_t entry, const ITraceEnt *head, int nhead,
             entry, total);
     fprintf(stderr, "[interp_trace] entry path:\n");
     for (int i = 0; i < nhead; i++)
-        fprintf(stderr, "    [%d] $%06X op=$%02X\n", i, head[i].pc, head[i].op);
-    /* Last 48 steps = the loop it is stuck in. */
-    long start = total > 48 ? total - 48 : 0;
+        fprintf(stderr, "    [%d] $%06X op=$%02X S=$%04X\n", i, head[i].pc,
+                head[i].op, (unsigned)head[i].sp);
+    /* T050: print the WHOLE ring, not a fixed 48. A control-transfer
+     * corruption is diagnosed by the step that PRODUCED the bad frame, and
+     * that can be hundreds of steps before the trap — the 48-step window hid
+     * it (the ring was 256 deep and 208 entries were being thrown away).
+     * SNESRECOMP_ITRACE_SPAN=<1..256> narrows it again. */
+    long span = 256;
+    { const char *_e = getenv("SNESRECOMP_ITRACE_SPAN");
+      if (_e && *_e) { long _v = strtol(_e, NULL, 0); if (_v > 0 && _v <= 256) span = _v; } }
+    long start = total > span ? total - span : 0;
+    if (start < total - 256) start = total - 256;  /* the ring only holds 256 */
     fprintf(stderr, "[interp_trace] last %ld steps (the spin):\n", total - start);
     for (long i = start; i < total; i++) {
         const ITraceEnt *e = &ring[i & 255];
-        fprintf(stderr, "    $%06X op=$%02X\n", e->pc, e->op);
+        fprintf(stderr, "    $%06X op=$%02X S=$%04X\n", e->pc, e->op,
+                (unsigned)e->sp);
     }
 }
 
@@ -1817,7 +1827,10 @@ static int _interp_run_core(CpuState *cpu, uint32_t entry_pc24,
             }
         }
         {
-            ITraceEnt _e = { pc_before, op };
+            /* T050: sp goes in the ring so a trap dump shows WHERE the stack
+             * went misaligned, not just that it did. The 3-step window around
+             * a bad RTS is useless without the S it popped from. */
+            ITraceEnt _e = { pc_before, op, (uint16_t)in.sp };
             if (itn < 8) head[itn] = _e;
             if (trace) ring[itn & 255] = _e;
             itn++;
@@ -1869,22 +1882,57 @@ static int _interp_run_core(CpuState *cpu, uint32_t entry_pc24,
          * handed us a corrupted target (e.g. an RTL that popped a garbage
          * return-frame bank byte). Trap the FIRST such step and dump the
          * recent ring — the transfer that produced it is the last few lines.
-         * Env-gated so it costs nothing in normal runs. */
+         * Env-gated so it costs nothing in normal runs.
+         *
+         * T050: the generic $00-$3F rule is too permissive for a SMALLER LoROM
+         * image. A 512 KiB dump has banks $00-$0F; $10-$3F is just wrap-around
+         * of the same bytes, so a corrupted PB landing there reads real ROM and
+         * the meltdown runs on for hundreds of steps before the trap fires —
+         * which is why the first T050 dump blamed $43 when the walk had already
+         * reached $11. Fold the cartridge's real bank count into the test so the
+         * trap fires at the FIRST bank the image cannot back.
+         *
+         * T050 (2nd pass): the bank test alone still traps hundreds of steps
+         * late, because the corrupted transfer lands in the SYSTEM WINDOW
+         * (PB in the LoROM exec range but PC < $8000) and then NOP-slides
+         * through zeroed memory until it wanders into a bank the image cannot
+         * back. That slide is hundreds of one-byte steps long, so the 256-entry
+         * ring cannot reach the step that PRODUCED it. Trap the first step in
+         * a no-code region too — that is the onset, and the ring still covers
+         * the 256 steps that led to it. */
         {
             static int _tbp = -1;
             if (_tbp < 0) _tbp = getenv("SNESRECOMP_TRAP_BADPB") ? 1 : 0;
             if (_tbp) {
                 uint8_t _pbnk = (uint8_t)((pc_before >> 16) & 0xFF);
+                const char *_why = NULL;
                 int _valid = (_pbnk <= 0x3F) ||
                              (_pbnk >= 0x80 && _pbnk <= 0xBF) ||
                              (_pbnk == 0x7E || _pbnk == 0x7F);
+                if (_valid && _pbnk <= 0x3F && g_snes && g_snes->cart &&
+                    g_snes->cart->romSize) {
+                    /* Banks the image actually has, after LoROM mirroring
+                     * ($20-$3F -> $00-$1F). Anything past that is wrap-around. */
+                    uint32_t _banks = g_snes->cart->romSize >> 15;
+                    uint8_t _eff = (uint8_t)(_pbnk & 0x1F);
+                    if (_eff >= _banks) { _valid = 0; _why = "bank not in image"; }
+                }
+                /* $0000-$7FFF in banks $00-$3F is the system page (WDM, and the
+                 * $2100-$43FF register file) plus its WRAM mirror. No ROM code
+                 * lives there; executing it is always a bad transfer. */
+                if (_valid && _pbnk < 0x80 && (pc_before & 0xFFFF) < 0x8000) {
+                    _valid = 0;
+                    _why = "exec in system window (no code)";
+                }
                 if (!_valid) {
                     extern int snes_frame_counter;
                     fprintf(stderr,
                         "[trap-badpb] interp entered PB=$%02X at pc=$%06X "
-                        "op=$%02X frame=%d sp=$%04X — corrupted control transfer\n",
+                        "op=$%02X frame=%d sp=$%04X — corrupted control transfer"
+                        "%s%s\n",
                         _pbnk, (unsigned)pc_before, op, snes_frame_counter,
-                        (unsigned)in.sp);
+                        (unsigned)in.sp,
+                        _why ? ": " : " (no reason)", _why ? _why : "");
                     /* Step history at the trap. This branch had an
                      * always-on file-static ring (g_itrace_recent); main
                      * replaced it with the function-local one above, so use
