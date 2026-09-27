@@ -1288,6 +1288,75 @@ static void DrawPpuFrameWithPerf(void) {
              g_snes_height * render_scale, 2);
   snes_config_bar_draw(pixel_buffer, pitch, g_snes_width * render_scale,
                        g_snes_height * render_scale);
+  /* SNESRECOMP_WRAM_DUMP=<path.bin> [SNESRECOMP_WRAM_DUMP_FRAME=<n>]
+   * [SNESRECOMP_WRAM_DUMP_AT=<f1,f2,...>] [SNESRECOMP_WRAM_DUMP_LO=<hex>]
+   * [SNESRECOMP_WRAM_DUMP_HI=<hex>]: write the emulated WRAM to a file, as
+   * many snapshots as you ask for.
+   *
+   * This exists because the framework's WRAM change tracer is NOT in this
+   * repository: host_main.c calls snes_oracle_init_default() under
+   * enable_snes9x_oracle, but no definition of it exists here, so the flag is
+   * OFF and linking is unaffected. tools/wram_diff.py consumes the oracle's
+   * {f,adr,old,val} jsonl and is a leftover with nothing to feed it.
+   *
+   * Locating a game's state therefore needs a substitute, and this is the
+   * cheap one: two runs, two dumps, diff the files. `AT` takes several frames
+   * so a value that MOVES can be told from one that is merely non-zero - a
+   * single snapshot of a city is mostly furniture. */
+  {
+    static int wram_done;
+    static long wram_at_next = -1;
+    static int wram_at[64], wram_at_n = 0, wram_at_i = 0;
+    static long wram_lo = 0, wram_hi = 0x20000;
+    const char *path = wram_done ? NULL : HostGetenv("WRAM_DUMP");
+    if (!path) {
+      /* Nothing to do; keep the block cheap. */
+    } else if (wram_at_n == 0) {
+      const char *a = HostGetenv("WRAM_DUMP_AT");
+      const char *v;
+      if (a) {
+        while (*a && wram_at_n < 64) {
+          char *end;
+          long f = strtol(a, &end, 10);
+          if (end == a) break;
+          wram_at[wram_at_n++] = (int)f;
+          a = (*end == ',') ? end + 1 : end;
+        }
+      }
+      v = HostGetenv("WRAM_DUMP_LO"); if (v) wram_lo = strtol(v, NULL, 0);
+      v = HostGetenv("WRAM_DUMP_HI"); if (v) wram_hi = strtol(v, NULL, 0);
+      v = HostGetenv("WRAM_DUMP_FRAME");
+      if (wram_at_n == 0)
+        wram_at[wram_at_n++] = v ? (int)strtol(v, NULL, 0) : 600;
+      wram_at_next = wram_at[0];
+    }
+    if (path && wram_at_i < wram_at_n && (long)g_present_frame >= wram_at_next) {
+      char one[1024];
+      FILE *f;
+      long lo = wram_lo, hi = wram_hi;
+      if (lo < 0) lo = 0;
+      if (hi > 0x20000) hi = 0x20000;
+      snprintf(one, sizeof one, "%s.f%d.bin", path, wram_at[wram_at_i]);
+      f = fopen(one, "wb");
+      if (f) {
+        /* g_ram is the flat 128KB region (common_rtl.h), which is the same
+         * bytes cpu->ram points at, so a dump taken here is the state the
+         * guest sees - not a copy that could drift. */
+        extern uint8 g_ram[0x20000];
+        size_t n = (size_t)(hi - lo);
+        fwrite(&g_ram[lo], 1, n, f);
+        fclose(f);
+        fprintf(stderr, "[wramdump] wrote %s (%zu bytes, frame %ld)\n",
+                one, n, (long)g_present_frame);
+      } else {
+        fprintf(stderr, "[wramdump] cannot write %s\n", one);
+      }
+      wram_at_i++;
+      wram_at_next = (wram_at_i < wram_at_n) ? wram_at[wram_at_i] : 0;
+      if (wram_at_i >= wram_at_n) wram_done = 1;
+    }
+  }
+
   /* SNESRECOMP_SCREENSHOT=<path.ppm> [SNESRECOMP_SCREENSHOT_FRAME=<n>]: write
    * the frame presented at simulated frame n (default: the first) as a PPM,
    * OSD included: it is what the player sees, not the bare field.
