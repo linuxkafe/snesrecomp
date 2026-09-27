@@ -306,6 +306,11 @@ int joypad_soft_mouse_map(SoftMouseState *st, int dx, int dy, int left,
         if (ay >  kSmAccMax) ay = kSmAccMax;
         if (ay < -kSmAccMax) ay = -kSmAccMax;
 
+        /* dy arrives in SCREEN space, where +y is DOWN; the d-pad's +y is UP.
+         * Without the negation, pushing the pointer down drove the cursor up.
+         * dx needs no flip: screen +x and d-pad +x are both right. */
+        ay = -ay;
+
         uint16_t dir = 0;
         if (ax >= threshold)       { dir |= SM_RIGHT; ax -= threshold; }
         else if (ax <= -threshold) { dir |= SM_LEFT;  ax += threshold; }

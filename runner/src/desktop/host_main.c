@@ -259,6 +259,7 @@ static int g_soft_mouse_pulse;       /* frames each press is held */
  * motion either way, and sharing one cursor with a feature that is usually
  * off would couple two things that have no reason to be coupled. */
 static int g_soft_mouse_last_x, g_soft_mouse_last_y;
+static int g_soft_mouse_primed;
 static int g_soft_mouse_log_shown;
 static unsigned long g_soft_mouse_pulses;
 
@@ -275,10 +276,14 @@ static void soft_mouse_init(void) {
   g_soft_mouse_threshold = env_int_or("SOFT_MOUSE_THRESHOLD", 4);
   g_soft_mouse_pulse = env_int_or("SOFT_MOUSE_PULSE", 2);
   if (g_soft_mouse_enabled) {
-    float fx = 0.0f, fy = 0.0f;
-    SDL_GetMouseState(&fx, &fy);
-    g_soft_mouse_last_x = (int)fx;
-    g_soft_mouse_last_y = (int)fy;
+    /* The anchor is NOT taken here. This runs before the window exists, and
+     * the pointer is somewhere unhelpful at that moment; by the first frame it
+     * has moved to where the player actually has it. Seeding from here made
+     * frame 0 report the pointer's whole absolute position as motion - 820px
+     * measured on a real run - which is 205 queued presses at a 4px threshold,
+     * and the backlog then drained for hundreds of frames as a drift the
+     * player had not asked for. The first frame primes the anchor instead. */
+    g_soft_mouse_primed = 0;
     memset(&g_soft_mouse, 0, sizeof g_soft_mouse);
     host_report_breadcrumb("soft mouse: on (threshold=%d px/press, pulse=%d frames)",
                            g_soft_mouse_threshold, g_soft_mouse_pulse);
@@ -3525,9 +3530,25 @@ error_reading:;
       float fx = 0.0f, fy = 0.0f;
       uint32 mb = SDL_GetMouseState(&fx, &fy);
       int mx = (int)fx, my = (int)fy;
-      int dx = mx - g_soft_mouse_last_x, dy = my - g_soft_mouse_last_y;
-      g_soft_mouse_last_x = mx;
-      g_soft_mouse_last_y = my;
+      int dx, dy;
+      if (!g_soft_mouse_primed) {
+        g_soft_mouse_last_x = mx;
+        g_soft_mouse_last_y = my;
+        g_soft_mouse_primed = 1;
+        dx = dy = 0;
+        /* Logged, not silent: a real run reported dx=+820 on frame 0, which is
+         * the pointer's absolute position arriving as motion. If this line
+         * shows the anchor landing where the player has the pointer, the warp
+         * is gone; if it shows 0,0 the anchor is being read too early again. */
+        if (HostGetenv("SOFT_MOUSE_LOG"))
+          fprintf(stderr, "[softmouse] primed at %d,%d (no motion this frame)\n",
+                  mx, my);
+      } else {
+        dx = mx - g_soft_mouse_last_x;
+        dy = my - g_soft_mouse_last_y;
+        g_soft_mouse_last_x = mx;
+        g_soft_mouse_last_y = my;
+      }
       if (dx > 1000 || dx < -1000 || dy > 1000 || dy < -1000) {
         joypad_soft_mouse_reset(&g_soft_mouse);
         dx = dy = 0;

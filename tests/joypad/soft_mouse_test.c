@@ -79,14 +79,34 @@ static void test_no_motion_no_pulse(void) {
   CHECK(bits == 0, "bits should be 0, got %04X", bits);
 }
 
+/* dy is SCREEN space: +y is DOWN, because that is what SDL hands the host and
+ * what the player's hand does. The d-pad's +y is UP, so the mapper negates.
+ *
+ * These four expectations were the wrong way round for a long time - they
+ * asserted +dy -> UP, which is what the implementation did, and a test written
+ * to match the code instead of the world passes forever while the cursor
+ * travels the wrong way. A real run is what caught it: dx=+21 dy=-5 emitted
+ * bits=0090 = SM_UP|SM_RIGHT, so moving the pointer DOWN and slightly LEFT
+ * drove the cursor UP and RIGHT. dx needs no flip - screen +x and d-pad +x are
+ * both right - which is why only the vertical axis was ever wrong.
+ */
 static void test_directions(void) {
-  printf("each direction maps to its own pad bit\n");
+  printf("each direction maps to its own pad bit (dy is screen space)\n");
   struct { int dx, dy; uint16_t want; const char *name; } cases[] = {
     {  20,   0, SM_RIGHT, "right" },
     { -20,   0, SM_LEFT,  "left"  },
-    {   0,  20, SM_UP,    "up"    },
-    {   0, -20, SM_DOWN,  "down"  },
+    {   0, -20, SM_UP,    "up (pointer moved up)"    },
+    {   0,  20, SM_DOWN,  "down (pointer moved down)" },
   };
+  /* The exact shape the log produced: right and DOWN together. */
+  {
+    SoftMouseState st;
+    uint16_t bits = 0;
+    memset(&st, 0, sizeof st);
+    feed(&st, 21, 5, 0, 0, 1, 4, 1, &bits);
+    CHECK((bits & (SM_RIGHT | SM_DOWN)) == (SM_RIGHT | SM_DOWN),
+          "pointer down+right gives RIGHT|DOWN, got %04X", bits);
+  }
   for (unsigned i = 0; i < sizeof cases / sizeof *cases; i++) {
     SoftMouseState st;
     memset(&st, 0, sizeof st);
@@ -189,8 +209,11 @@ static void test_diagonal_uses_both_axes(void) {
   memset(&st, 0, sizeof st);
   uint16_t bits = 0;
   joypad_soft_mouse_map(&st, 20, 20, 0, 0, 4, 1, &bits);
-  /* RIGHT|UP in one word is a legal diagonal on a pad and does not cancel. */
-  CHECK((bits & SM_RIGHT) && (bits & SM_UP), "expected RIGHT|UP, got %04X", bits);
+  /* dy=+20 is 20px DOWNWARD, so the pad word is RIGHT|DOWN. This assertion
+   * also used to say UP, for the same reason the direction table did. */
+  CHECK((bits & SM_RIGHT) && (bits & SM_DOWN),
+        "expected RIGHT|DOWN, got %04X", bits);
+  CHECK(!(bits & SM_UP), "a downward drag must not also press UP, got %04X", bits);
 }
 
 static void test_reset(void) {

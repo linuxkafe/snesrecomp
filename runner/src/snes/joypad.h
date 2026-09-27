@@ -133,6 +133,9 @@ typedef struct {
  * measured: the guest latches the pad once per frame, so a one-frame press is
  * the fastest a cursor can move, and a longer one is what a cursor that
  * ignores edges needs. Returns the number of bits set, 0 if nothing fired. */
+/* dx/dy are SCREEN-space host motion, one frame's worth: +x is right and
+ * +y is DOWN. The d-pad is not in that convention - its +y is up - so the
+ * mapper negates dy. Callers pass the pointer delta unchanged. */
 int joypad_soft_mouse_map(SoftMouseState *st, int dx, int dy, int left,
                           int right, int threshold, int pulse_frames,
                           uint16_t *bits);
