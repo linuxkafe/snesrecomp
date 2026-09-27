@@ -215,6 +215,14 @@ echo "=== SNES Mouse (bsnes protocol) on a controller port ==="
     -o "$OUT/mouse_joypad_test"
 "$OUT/mouse_joypad_test"
 
+echo "=== soft mouse (host pointer -> guest d-pad cursor) ==="
+"$CC" -std=c11 -Wall -Wextra -Werror -O1 \
+    -I "$ROOT/runner/src" -I "$ROOT/runner/src/snes" \
+    "$ROOT/tests/joypad/soft_mouse_test.c" \
+    "$ROOT/runner/src/snes/joypad.c" \
+    -o "$OUT/soft_mouse_test"
+"$OUT/soft_mouse_test"
+
 echo "=== runtime dispatch ==="
 "$CC" -std=c11 -Wall -Wextra -ffunction-sections -fdata-sections \
     -I "$ROOT/runner/src" -I "$ROOT/runner/src/snes" \

@@ -96,6 +96,52 @@ int  joypad_get_device(int port);
  * mouse plugged in. Deltas saturate at 127 so a burst cannot overflow. */
 int  joypad_set_mouse(int port, int dx, int dy, int left, int right);
 
+/*
+ * Soft mouse: host PC pointer -> the GUEST'S OWN cursor, via virtual d-pad.
+ *
+ * This is NOT the SNES Mouse above, and the difference is the whole point. The
+ * peripheral is faithful to the hardware and correct, but a game only ever
+ * discovers it by reading past bit 15 ($4219/$421A/$421B); SimCity reads
+ * $4218 only, in two-byte pad strides, so it never asks and
+ * SNESRECOMP_MOUSE=1 does nothing for that title. A soft mouse needs no
+ * cooperation from the game: the title already HAS a d-pad cursor, so the
+ * host translates pointer motion into the presses that cursor consumes.
+ *
+ * Pure and frame-driven: one call per presented frame, feeding one frame's
+ * worth of pad bits. No SNES state, no globals - the host owns a
+ * SoftMouseState and passes it in, which is what makes it testable without a
+ * ROM.
+ *
+ * Buttons are TAPS, not holds, and that is deliberate. SimCity's A and B are
+ * edge-triggered (A places the selected tool, B cancels); holding them down
+ * would auto-repeat and scatter tiles. See joypad_soft_mouse_reset.
+ */
+typedef struct {
+  /* 32-bit, deliberately. A pointer warp (window drag, WM sync) delivers
+   * thousands of pixels in one frame; a 16-bit accumulator would wrap
+   * NEGATIVE there and flick the cursor the other way - which is the bug this
+   * width exists to prevent, and the soft_mouse_test pins it. */
+  int32_t acc_x, acc_y;   /* sub-step motion, so slow drags still register */
+  int8_t  pulse_left;     /* frames remaining on the pulse being emitted */
+  uint16_t pulse_bits;    /* the pad bits that pulse is made of */
+  uint8_t  prev_buttons;  /* for edge detection on the mouse buttons */
+} SoftMouseState;
+
+/* One frame. `bits` receives the pad bits to OR into the frame's inputs.
+ * `threshold` is pointer pixels per virtual press (0 -> 1); `pulse_frames` is
+ * how many frames each press is held down, which is the knob that has to be
+ * measured: the guest latches the pad once per frame, so a one-frame press is
+ * the fastest a cursor can move, and a longer one is what a cursor that
+ * ignores edges needs. Returns the number of bits set, 0 if nothing fired. */
+int joypad_soft_mouse_map(SoftMouseState *st, int dx, int dy, int left,
+                          int right, int threshold, int pulse_frames,
+                          uint16_t *bits);
+
+/* Forget accumulated motion and any pulse in flight. Call when the guest's
+ * session restarts (reset, save-state load) or the pointer is warped, so a
+ * warp does not arrive as one enormous flick. */
+void joypad_soft_mouse_reset(SoftMouseState *st);
+
 /* Read diagnostics for the SNESRECOMP_PAD_PROBE host knob: how many manual
  * reads the guest has made on a port since the device was configured, and the
  * deepest shift position those reads reached (0 when nothing read it). A game

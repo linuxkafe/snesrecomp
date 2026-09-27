@@ -242,6 +242,45 @@ static uint32 g_input_state;
  * feeds the last frame's host pointer deltas into the joypad layer. */
 static bool g_mouse_enabled;
 static int g_mouse_last_x, g_mouse_last_y;
+
+/* Soft mouse (SNESRECOMP_SOFT_MOUSE=1): the PC pointer driving the GUEST'S
+ * OWN d-pad cursor. Distinct from g_mouse_enabled above, which is the SNES
+ * Mouse peripheral - a game only finds that by reading past bit 15, and
+ * titles that do not (SimCity among them) never ask. This one needs no
+ * cooperation from the game: it synthesises the presses the cursor consumes.
+ * See joypad.h for the mapping and why the buttons are taps, not holds. */
+static bool g_soft_mouse_enabled;
+static SoftMouseState g_soft_mouse;
+static int g_soft_mouse_threshold;   /* pointer px per virtual press */
+static int g_soft_mouse_pulse;       /* frames each press is held */
+/* The soft mouse reads the same absolute pointer the peripheral path does, so
+ * it keeps its own previous position: a warp guard has to drop the accumulated
+ * motion either way, and sharing one cursor with a feature that is usually
+ * off would couple two things that have no reason to be coupled. */
+static int g_soft_mouse_last_x, g_soft_mouse_last_y;
+
+static int env_int_or(const char *name, int fallback) {
+  const char *v = HostGetenv(name);
+  if (!v || !*v)
+    return fallback;
+  int n = atoi(v);
+  return n > 0 ? n : fallback;
+}
+
+static void soft_mouse_init(void) {
+  g_soft_mouse_enabled = HostGetenv("SOFT_MOUSE") != NULL;
+  g_soft_mouse_threshold = env_int_or("SOFT_MOUSE_THRESHOLD", 4);
+  g_soft_mouse_pulse = env_int_or("SOFT_MOUSE_PULSE", 2);
+  if (g_soft_mouse_enabled) {
+    float fx = 0.0f, fy = 0.0f;
+    SDL_GetMouseState(&fx, &fy);
+    g_soft_mouse_last_x = (int)fx;
+    g_soft_mouse_last_y = (int)fy;
+    memset(&g_soft_mouse, 0, sizeof g_soft_mouse);
+    host_report_breadcrumb("soft mouse: on (threshold=%d px/press, pulse=%d frames)",
+                           g_soft_mouse_threshold, g_soft_mouse_pulse);
+  }
+}
 /* SNESRECOMP_PAD_PROBE=1 logs each port's manual-read depth so a headless
  * run can prove whether a game is serial-reading a device on that port. */
 static bool g_pad_probe;
@@ -2744,6 +2783,7 @@ error_reading:;
       host_report_breadcrumb("SNES Mouse enabled on port 2 (player 2)");
     }
   }
+  soft_mouse_init();
   {
     const char *v = HostGetenv("PAD_PROBE");
     g_pad_probe = v && atoi(v);
@@ -3300,6 +3340,29 @@ error_reading:;
      * saw, and every later scripted press landed a frame early. */
     inputs |= TickScript();
     inputs |= debug_server_get_controller_inputs();
+    if (g_soft_mouse_enabled) {
+      /* One latch cycle owns one frame of host motion, same as the peripheral
+       * path above. A pointer warp (window drag, WM sync) delivers thousands
+       * of pixels in a single frame; the accumulator saturates, but dropping
+       * the motion outright is kinder than a flick the player did not ask
+       * for, so anything past a plausible drag resets instead. */
+      float fx = 0.0f, fy = 0.0f;
+      uint32 mb = SDL_GetMouseState(&fx, &fy);
+      int mx = (int)fx, my = (int)fy;
+      int dx = mx - g_soft_mouse_last_x, dy = my - g_soft_mouse_last_y;
+      g_soft_mouse_last_x = mx;
+      g_soft_mouse_last_y = my;
+      if (dx > 1000 || dx < -1000 || dy > 1000 || dy < -1000) {
+        joypad_soft_mouse_reset(&g_soft_mouse);
+        dx = dy = 0;
+      }
+      uint16 bits = 0;
+      joypad_soft_mouse_map(&g_soft_mouse, dx, dy,
+                            (mb & SDL_BUTTON_LMASK) != 0,
+                            (mb & SDL_BUTTON_RMASK) != 0,
+                            g_soft_mouse_threshold, g_soft_mouse_pulse, &bits);
+      inputs |= bits;
+    }
     if (g_mouse_enabled) {
       /* One latch cycle owns one frame of host motion; sheep-dogging the
        * absolute pointer position as a delta keeps it immune to pointer

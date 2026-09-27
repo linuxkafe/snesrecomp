@@ -367,45 +367,6 @@ case CART_CX4:
 }
 
 #include "../cpu_trace.h"
-#include "../cpu_state.h"
-
-/* T048: env-gated context dump for out-of-range cart reads. Since
- * cart_readLorom is reached only via cart_read (DMA source snes_read /
- * HDMA table reads — cpu_read8 routes LoROM through RomPtr, not here),
- * print the full DMA/HDMA channel state so a manual repro identifies the
- * offending channel + mode + B-bus target in one shot. */
-static void cart_dump_ob_context(uint8_t bank, uint16_t adr) {
-  extern int snes_frame_counter;
-  extern uint32_t g_interp_wlog_pc24;
-  extern const char *g_last_recomp_func;
-  extern Dma *g_dma;
-  extern CpuState g_cpu;
-  static int on = -1;
-  if (on < 0) { const char *v = getenv("SNESRECOMP_OB_LOG"); on = (v && v[0] && v[0] != '0'); }
-  if (!on) return;
-  fprintf(stderr,
-      "[ob] f%d hit=%02X:%04X cpu PB=%02X DB=%02X S=%04X "
-      "open=%02X func=%s interp=%06X\n",
-      snes_frame_counter, bank, (unsigned)adr,
-      g_cpu.PB, g_cpu.DB, g_cpu.S, g_cpu.open_bus,
-      g_last_recomp_func ? g_last_recomp_func : "<none>",
-      (unsigned)g_interp_wlog_pc24);
-  if (!g_dma) return;
-  for (int i = 0; i < 8; i++) {
-    DmaChannel *c = &g_dma->channel[i];
-    if (!c->dmaActive && !c->hdmaActive) continue;
-    fprintf(stderr,
-        "  [ob] ch%d %s src=%02X:%04X bAdr=$21%02X mode=%u size=%u "
-        "fromB=%d fixed=%d dec=%d ind=%d tbl=%02X:%04X rep=%u "
-        "doX=%d term=%d\n",
-        i, c->hdmaActive ? "HDMA" : "DMA", c->aBank, (unsigned)c->aAdr,
-        (unsigned)c->bAdr, (unsigned)c->mode, (unsigned)c->size,
-        c->fromB ? 1 : 0, c->fixed ? 1 : 0, c->decrement ? 1 : 0,
-        c->indirect ? 1 : 0, c->indBank, (unsigned)c->tableAdr,
-        (unsigned)c->repCount, c->doTransfer ? 1 : 0, c->terminated ? 1 : 0);
-  }
-}
-
 static uint8_t cart_readLorom(Cart* cart, uint8_t bank, uint16_t adr) {
   if(((bank >= 0x70 && bank < 0x7e) || bank >= 0xf0) && adr < 0x8000 && cart->ramSize > 0) {
     // banks 70-7e and f0-ff, adr 0000-7fff
@@ -417,10 +378,7 @@ static uint8_t cart_readLorom(Cart* cart, uint8_t bank, uint16_t adr) {
   }
   /* Out-of-range cart read. No printf — the ring buffer is the
    * channel. cpu_trace_offrails dumps trace at hit#1 + every 64th
-   * so we see the chain WITHOUT million-line stderr floods.
-   * SNESRECOMP_OB_LOG=1 additionally dumps the DMA/HDMA channel state
-   * (this function is only reachable from the DMA/HDMA source path). */
-  cart_dump_ob_context(bank, adr);
+   * so we see the chain WITHOUT million-line stderr floods. */
   cpu_trace_offrails("cart_readLorom", (uint32_t)bank << 16 | adr);
   return 0;
 }

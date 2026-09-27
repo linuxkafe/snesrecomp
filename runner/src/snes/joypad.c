@@ -238,6 +238,93 @@ int joypad_set_mouse(int port, int dx, int dy, int left, int right)
     return 1;
 }
 
+void joypad_soft_mouse_reset(SoftMouseState *st) {
+    if (!st)
+        return;
+    st->acc_x = st->acc_y = 0;
+    st->pulse_left = 0;
+    st->pulse_bits = 0;
+    /* prev_buttons survives: a pointer warp must not be read as a click, and
+     * the caller resets this only at a real session boundary. */
+}
+
+/* The pad bit layout is the host's (snes_overlay_draw.h), reproduced here
+ * rather than included so this file stays free of desktop headers. */
+#define SM_UP    0x0010u
+#define SM_DOWN  0x0020u
+#define SM_LEFT  0x0040u
+#define SM_RIGHT 0x0080u
+/* Far enough past any real drag that only a warp reaches it, and small
+ * enough that a day-long drag cannot reach it either. */
+#define kSmAccMax 1000000
+
+#define SM_A     0x0100u
+#define SM_B     0x0001u
+
+int joypad_soft_mouse_map(SoftMouseState *st, int dx, int dy, int left,
+                          int right, int threshold, int pulse_frames,
+                          uint16_t *bits) {
+    if (!st || !bits)
+        return 0;
+    if (threshold < 1)
+        threshold = 1;
+    if (pulse_frames < 1)
+        pulse_frames = 1;
+    if (pulse_frames > 127)
+        pulse_frames = 127;
+
+    const uint8_t now = (uint8_t)((left ? 1u : 0u) | (right ? 2u : 0u));
+    /* A button tap is a rising edge only, and it is edge-detected EVERY frame
+     * so a click that lands while a d-pad pulse is in flight is not lost and
+     * is not re-fired afterwards. Repeat-on-hold is deliberately absent:
+     * SimCity's A places the selected tool and its B cancels, so an
+     * auto-repeating click would scatter tiles instead of placing one. */
+    uint16_t out = 0;
+    if ((now & 1u) && !(st->prev_buttons & 1u))
+        out |= SM_A;
+    if ((now & 2u) && !(st->prev_buttons & 2u))
+        out |= SM_B;
+    st->prev_buttons = now;
+
+    if (st->pulse_left > 0) {
+        /* A d-pad pulse owns the frame's direction. Two directions in one
+         * word read as "both pressed", which the host then cancels, so
+         * overlapping direction presses would be LOST rather than doubled -
+         * hence one at a time. This also bounds cursor speed to
+         * (guest pixels per press) / pulse_frames. */
+        out |= st->pulse_bits;
+        if (--st->pulse_left == 0)
+            st->pulse_bits = 0;
+    } else {
+        /* Accumulate in 32 bits and saturate. Narrowing BEFORE the clamp is
+         * the bug this replaces: (int16_t)(0 + 40000) is negative, so a warp
+         * arrived as motion to the left. */
+        int32_t ax = st->acc_x + dx;
+        int32_t ay = st->acc_y + dy;
+        if (ax >  kSmAccMax) ax = kSmAccMax;
+        if (ax < -kSmAccMax) ax = -kSmAccMax;
+        if (ay >  kSmAccMax) ay = kSmAccMax;
+        if (ay < -kSmAccMax) ay = -kSmAccMax;
+
+        uint16_t dir = 0;
+        if (ax >= threshold)       { dir |= SM_RIGHT; ax -= threshold; }
+        else if (ax <= -threshold) { dir |= SM_LEFT;  ax += threshold; }
+        if (ay >= threshold)       { dir |= SM_UP;    ay -= threshold; }
+        else if (ay <= -threshold) { dir |= SM_DOWN;  ay += threshold; }
+
+        st->acc_x = ax;
+        st->acc_y = ay;
+        if (dir) {
+            st->pulse_bits = dir;
+            st->pulse_left = (int8_t)(pulse_frames - 1);
+            out |= dir;
+        }
+    }
+
+    *bits = out;
+    return out != 0;
+}
+
 uint32_t joypad_read_count(int port)
 {
     if (port < 0 || port >= SNES_CONTROLLER_PORTS)
