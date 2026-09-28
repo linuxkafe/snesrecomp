@@ -82,6 +82,15 @@ typedef struct {
  * address is unlocated). NULL leaves cheat rows showing just their value. */
 void snes_config_bar_set_cheat_note(const char *(*note)(int cheat_index));
 
+/* RENDERER is supplied by the host because only the host knows which render
+ * drivers SDL actually offers on this machine and build - vulkan among them.
+ * A hardcoded list here hid it. `current` is a list index, not the stored
+ * string, and `choose` applies one. */
+void snes_config_bar_set_renderers(int count,
+                                   const char *(*name)(int index),
+                                   int (*current)(void),
+                                   void (*choose)(int index));
+
 void snes_config_bar_init(const SnesConfigBarHooks *hooks,
                           int (*get_value)(int index),
                           void (*set_value)(int index, int value));

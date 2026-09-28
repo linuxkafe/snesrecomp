@@ -1127,7 +1127,6 @@ static void ConfigBarSet(int idx, int v) {
     case 0:  snesrecomp_desktop_set_widescreen(v); break;
     case 1:  ChangeWindowScale(v - g_config.window_scale); break;
     case 2:  g_config.display_aspect = (uint8_t)v; break;
-    case 3:  RendererApply(v); break;
     case 5:  g_config.linear_filtering = v; break;
     case 6:  g_config.no_sprite_limits = v; break;
     case 7:  g_config.frame_blend = v; FrameBlendConfigure(); break;
@@ -1165,6 +1164,25 @@ static void ConfigBarSet(int idx, int v) {
   }
 }
 
+/* The runtime renderer list, handed to the bar so RENDERER offers what SDL
+ * actually has here - vulkan included - instead of a hardcoded pair. */
+static const char *ConfigBarRendererName(int index) {
+  RendererEnumerate();
+  if (index < 0 || index >= g_renderer_count) return "?";
+  return g_renderer_label_ptr[index];
+}
+
+static int ConfigBarRendererCurrent(void) {
+  RendererEnumerate();
+  return RendererChoice();
+}
+
+static void ConfigBarRendererChoose(int index) {
+  RendererEnumerate();
+  if (index < 0 || index >= g_renderer_count) return;
+  RendererApply(index);
+}
+
 static const char *ConfigBarCheatNote(int cheat_index) {
   const SnesCheat *c = snes_cheat_at(cheat_index);
   if (!c) return 0;
@@ -1198,6 +1216,8 @@ static void ConfigBarInit(void) {
   memset(&h, 0, sizeof(h));
   h.set_display_perf = Bar_SetPerf;
   snes_config_bar_set_cheat_note(ConfigBarCheatNote);
+  snes_config_bar_set_renderers(kRendererMax, ConfigBarRendererName,
+                              ConfigBarRendererCurrent, ConfigBarRendererChoose);
   snes_config_bar_init(&h, ConfigBarGet, ConfigBarSet);
 }
 

@@ -33,6 +33,14 @@
 static SnesConfigBarHooks g_hooks;
 static int (*g_get)(int index);
 static void (*g_set)(int index, int value);
+/* RENDERER is enumerated by the HOST at runtime, not hardcoded here. SDL
+ * offers whatever render drivers the build and the machine have, and vulkan is
+ * one of them - a fixed list silently hid it, which is the whole point of
+ * asking for it. The bar asks the host for the names and the count. */
+static int g_renderer_count;
+static const char *(*g_renderer_name)(int index);
+static int (*g_renderer_current)(void);
+static void (*g_renderer_choose)(int index);
 static const char *(*g_cheat_note)(int cheat_index);
 static int g_expanded;
 static int g_sel;
@@ -54,7 +62,6 @@ typedef struct {
 } Opt;
 
 static const char *const kAspectNames[]   = { "AUTO", "4:3", "16:9", "16:10" };
-static const char *const kRendererNames[] = { "AUTO", "OPENGL" };
 /* Up to kMaxWindowScale (10) in host_main.c, not 6. The bar was capping
  * below the host's own ceiling, so a 4K display - where the host allows
  * 9x - could not be reached from the bar. The host clamps to the display
@@ -87,7 +94,7 @@ static Opt g_options[] = {
   O("GRAPHICS", "WIDESCREEN",     kOpt_Bool, NULL,            0, 1, 0, 1, 1),
   O("GRAPHICS", "WINDOWSCALE",     kOpt_Enum, kScaleNames,    10, 1, 0, 9, 1),
   O("GRAPHICS", "DISPLAYASPECT",   kOpt_Enum, kAspectNames,    4, 1, 0, 3, 1),
-  O("GRAPHICS", "RENDERER",        kOpt_Enum, kRendererNames,  2, 1, 0, 1, 1),
+  O("GRAPHICS", "RENDERER",        kOpt_Enum, NULL,         0, 1, 0, 0, 1),
   O("GRAPHICS", "SHADER",          kOpt_Bool, NULL,            0, 1, 0, 1, 0),
   O("GRAPHICS", "LINEARFILTERING", kOpt_Bool, NULL,            0, 1, 0, 1, 1),
   O("GRAPHICS", "NOSPRITELIMITS",  kOpt_Bool, NULL,            0, 1, 0, 1, 1),
@@ -185,6 +192,16 @@ void snes_config_bar_set_cheat_note(const char *(*note)(int cheat_index)) {
   g_cheat_note = note;
 }
 
+void snes_config_bar_set_renderers(int count,
+                                   const char *(*name)(int index),
+                                   int (*current)(void),
+                                   void (*choose)(int index)) {
+  g_renderer_count = count;
+  g_renderer_name = name;
+  g_renderer_current = current;
+  g_renderer_choose = choose;
+}
+
 void snes_config_bar_init(const SnesConfigBarHooks *hooks,
                           int (*get_value)(int index),
                           void (*set_value)(int index, int value)) {
@@ -244,7 +261,17 @@ int snes_config_bar_step_row(int idx, int dir) {
   const Opt *o;
   if (idx < 0 || idx >= g_option_count) return 0;
   o = &g_options[idx];
-  if (!o->editable || !g_set) return 0;
+  if (!o->editable) return 0;
+  if (idx == 3 && g_renderer_choose && g_renderer_count > 0) {
+    int cur = g_renderer_current();
+    int nxt = cur + (dir > 0 ? 1 : g_renderer_count - 1);
+    if (nxt < 0) nxt = 0;
+    if (nxt >= g_renderer_count) nxt = g_renderer_count - 1;
+    g_sel = idx;
+    g_renderer_choose(nxt);
+    return 1;
+  }
+  if (!g_set) return 0;
   g_sel = idx;
   g_set(idx, next_value(o, opt_value(idx), dir));
   return 1;
@@ -379,7 +406,10 @@ void snes_config_bar_draw(uint8_t *dst, int pitch, int dst_w, int dst_h) {
         while (pad-- > 0) line[c++] = ' ';
         line[c] = 0;
         put(line, &c, "= ");
-        opt_value_str(o, idx, v);
+        if (idx == 3 && g_renderer_name && g_renderer_count > 0) {
+          int ri = g_renderer_current();
+          put(line, &c, (ri >= 0 && ri < g_renderer_count) ? g_renderer_name(ri) : "?");
+        } else opt_value_str(o, idx, v);
         put(line, &c, v);
         if (!o->editable) put(line, &c, "  RESTART");
         else if (idx >= 30) {
