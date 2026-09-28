@@ -696,6 +696,7 @@ static ScriptEntry *NewScriptEntry(int *cap) {
  *   wait N                  frames before the next command
  *   press <buttons> [N]     hold a+b+... for N frames (default 1)
  *   loadstate N             load save-state slot N
+ *   savestate N             save save-state slot N
  *   poke <addr> <hex>       write WRAM bytes for one frame
  *   pokefor <addr> <hex> N  write WRAM bytes for N frames
  *   forcepoke <addr> <hex>  write WRAM bytes every frame from now on */
@@ -719,6 +720,20 @@ static void LoadScript(const char *path) {
     if (strcmp(cmd, "wait") == 0) {
       int frames = (sscanf(line, "%*s %d", &n) == 1) ? n : 0;
       pending_wait += frames;
+    } else if (strcmp(cmd, "savestate") == 0) {
+      /* The mirror of loadstate, which existed alone. Without it a script can
+       * restore a state it has no way to create, so the pair is only useful if
+       * the player saved one by hand - and the whole point here is to make an
+       * experiment cheap by not replaying thousands of frames to reach a
+       * screen. 0x10000000 is the next free high bit below the existing
+       * loadstate (0x80000000) and poke (0x40000000) flags. */
+      int slot = 0;
+      sscanf(line, "%*s %d", &slot);
+      ScriptEntry *e = NewScriptEntry(&cap);
+      e->mask = 0x10000000u | (slot & 0xF);
+      e->hold_frames = 1;
+      e->wait_frames = pending_wait;
+      pending_wait = 0;
     } else if (strcmp(cmd, "loadstate") == 0) {
       int slot = 0;
       sscanf(line, "%*s %d", &slot);
@@ -810,6 +825,10 @@ static uint32 TickScript(void) {
       if (e->mask & 0x80000000) {
         RtlSaveLoad(kSaveLoad_Load, e->mask & 0xF);
         GameReset();
+        return 0;
+      }
+      if (e->mask & 0x10000000u) {
+        RtlSaveLoad(kSaveLoad_Save, e->mask & 0xF);
         return 0;
       }
       if (e->mask & 0x40000000) {
