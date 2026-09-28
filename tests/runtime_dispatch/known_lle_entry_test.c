@@ -178,6 +178,14 @@ int main(void) {
     cart.type = CART_LOROM;
     fails += check(cart_getRomPtr(&cart, 0x00, 0x8000) == g_test_rom,
                    "LoROM pointer preserves historical half-bank mapping");
+    /* The low-bank window is open bus in LoROM too, and this is the address
+     * T048's off-rails hit named. It matters because the chip mirror added
+     * after that hit (off % romSize) sits BELOW this guard, so a future
+     * "simplification" of the mirror would silently make every $00-$3F
+     * low address resolve to real ROM and the off-rails detector would go
+     * blind with no run to notice. */
+    fails += check(cart_getRomPtr(&cart, 0x00, 0x2000) == NULL,
+                   "LoROM pointer rejects the low-bank open-bus window");
 
     cart.type = CART_DSP1;
     cart.ramSize = 0x800;
