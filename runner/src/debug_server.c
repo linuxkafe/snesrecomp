@@ -4208,6 +4208,43 @@ static void cmd_set_cpu(const char *args) {
 // v1 ABI dispatch (void() / void(uint8)) — disabled in v2 builds where
 // every recompiled function takes CpuState*. A v2 registry will replace
 // this in a follow-up.
+/* Dump the interpreter's per-bank and per-PC execution profile NOW, and reset
+ * the buckets.
+ *
+ * The window is the point. The profile printed at exit has always accumulated
+ * from process start, so it mixes the title screen, the naming keyboard, the
+ * map-select screen and the running city into one number - and for this title
+ * that number said the VBlank spin was 99.9% of everything interpreted, when in
+ * fact the spin only runs on the menus and not at all in the city. One call
+ * here to discard the menu phase, one after, and the city gets its own
+ * profile.
+ *
+ * interp816_perf_dump() already resets the buckets as its last act, which is
+ * what makes the window work; this adds the per-bank view beside it and a way to
+ * ask for either at an arbitrary frame.
+ */
+static void cmd_interp_prof_dump(const char *args) {
+    extern void interp816_bank_hist_dump(void);
+    extern void interp816_perf_dump(void);
+    int want_banks = 1, want_pcs = 1;
+    if (args && *args) {
+        char a0 = args[0];
+        if (a0 == 'b') want_pcs = 0;
+        else if (a0 == 'p') want_banks = 0;
+    }
+    if (want_banks) interp816_bank_hist_dump();
+    if (want_pcs) {
+        fprintf(stderr, "[phase] top interp PCs (window):\n");
+        interp816_perf_dump();   /* prints, then zeroes the buckets */
+    } else {
+        /* Bank-only still has to reset, or the next window inherits this one. */
+        extern void interp816_perf_dump(void);
+        interp816_perf_dump();
+    }
+    send_fmt("{\"ok\":true,\"banks\":%d,\"pcs\":%d,\"buckets_reset\":true}",
+             want_banks, want_pcs);
+}
+
 static void cmd_invoke_recomp(const char *args) {
     (void)args;
     send_fmt("{\"error\":\"invoke_recomp disabled in v2 build\"}");
@@ -8259,6 +8296,7 @@ static const CmdEntry s_commands[] = {
     {"save_state",    cmd_save_state},
     {"load_state",    cmd_load_state},
     {"invoke_recomp", cmd_invoke_recomp},
+    {"interp_prof_dump", cmd_interp_prof_dump},
     {"write_ram",     cmd_write_ram},
     {"zero_ram",      cmd_zero_ram},
     {"set_cpu",       cmd_set_cpu},
