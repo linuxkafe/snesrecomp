@@ -91,3 +91,7 @@ void     interp816_saveload(Interp816 *cpu, SaveLoadInfo *sli);
 extern int interp816_opcode_hook(uint32_t addr);
 
 #endif /* INTERP816_H */
+
+/* Per-bank share of interpreted execution, aggregated from the PC buckets
+ * SNESRECOMP_PHASE_MS fills. Prints to stderr and resets them. */
+void interp816_bank_hist_dump(void);

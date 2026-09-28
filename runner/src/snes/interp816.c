@@ -223,6 +223,52 @@ void interp816_perf_dump(void) {
 
 /* Dump the opcode-cost histogram (SNESRECOMP_INTERP_OPCODE_HIST) sorted by
  * total host-ns, with per-opcode sample count and avg ns/opcode. */
+/* Per-bank execution histogram, aggregated from the same sampled PC buckets
+ * interp816_perf_dump() prints the top of.
+ *
+ * This is the shape the question actually needs. "Which 8 KB banks should be
+ * recompiled first" is not answered by the top sixteen PCs - it is answered by
+ * where the interpreter spends its instructions, because anything without a
+ * func declaration in recomp/bankXX.cfg runs interpreted. A bank at 30% of all
+ * samples is the one worth a day's function-boundary work; a bank at 0.1% is
+ * not.
+ *
+ * The buckets are keyed by a hash of the 24-bit PC, so a bucket holds one
+ * representative address and two PCs that collided are merged. That costs
+ * precision in the per-PC numbers and barely touches this one: collisions
+ * inside a single bank are invisible, and a collision ACROSS banks would have
+ * to outweigh the bucket of the smaller one to distort its share.
+ */
+void interp816_bank_hist_dump(void) {
+    uint64_t per_bank[64];
+    int i;
+    if (s_pc_bucket_total == 0) return;
+    memset(per_bank, 0, sizeof per_bank);
+    for (i = 0; i < INTERP_PC_BUCKETS; i++) {
+        uint32_t bank;
+        if (!s_pc_buckets[i]) continue;
+        bank = s_pc24[i] >> 16;                 /* $7E/$7F are RAM, not code */
+        if (bank >= 64) continue;
+        per_bank[bank] += s_pc_buckets[i];
+    }
+    /* Selection sort over 64 entries: clearer than pulling in qsort for a
+     * function that runs once, on exit. */
+    for (i = 0; i < 64; i++) {
+        int best = -1, j;
+        for (j = 0; j < 64; j++) {
+            if (per_bank[j] == 0) continue;
+            if (best < 0 || per_bank[j] > per_bank[best]) best = j;
+        }
+        if (best < 0) break;
+        fprintf(stderr, "[banks] bank$%02X  %8llu  %5.1f%%\n",
+                (unsigned)best, (unsigned long long)per_bank[best],
+                100.0 * (double)per_bank[best] / (double)s_pc_bucket_total);
+        per_bank[best] = 0;
+    }
+    fprintf(stderr, "[banks] total samples %llu (1 in 8 opcodes)\n",
+            (unsigned long long)s_pc_bucket_total);
+}
+
 void interp816_opcode_hist_dump(void) {
     uint64_t sum = 0;
     int cnt = 0;

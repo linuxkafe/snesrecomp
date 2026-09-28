@@ -2415,6 +2415,27 @@ static LONG WINAPI seh_handler(EXCEPTION_POINTERS* info) {
 }
 #endif
 
+/* The interpreter already samples the PC into 4096 buckets under
+ * SNESRECOMP_PHASE_MS, and interp816_perf_dump() already knew how to print
+ * them - but nothing in the tree ever CALLED either, so the profile was
+ * collected and thrown away. This is the call that makes it visible, and it
+ * prints per bank, which is the question that matters: a bank with no func
+ * declaration in recomp/bankXX.cfg runs interpreted, so the bank histogram is
+ * the recompilation worklist. */
+static void interp_profile_dump_atexit(void) {
+  if (!HostGetenv("PHASE_MS")) return;
+  extern void interp816_bank_hist_dump(void);
+  extern void interp816_perf_dump(void);
+  fprintf(stderr, "[banks] --- interpreted execution by bank ---\n");
+  interp816_bank_hist_dump();
+  /* The per-bank view says WHERE the interpreter spends its time; the per-PC
+   * view says WHICH instructions inside that bank, and that second list is
+   * the actual worklist: every one of those addresses is a candidate func
+   * entry for recomp/bankXX.cfg. */
+  fprintf(stderr, "[phase] hottest interpreted PCs:\n");
+  interp816_perf_dump();
+}
+
 static void post_mortem_atexit(void) {
   recomp_post_mortem_dump("atexit", NULL);
 }
@@ -2541,6 +2562,7 @@ int snesrecomp_desktop_main(const SnesDesktopHostGame *game, int argc, char **ar
    * having to dismiss a popup first. */
   SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
 #endif
+  atexit(interp_profile_dump_atexit);
   atexit(post_mortem_atexit);
   host_report_init(game->display_name, build_version);
   /* ARM the backwards watcher BEFORE any recompiled code runs. Without
