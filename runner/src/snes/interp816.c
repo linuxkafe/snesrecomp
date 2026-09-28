@@ -185,6 +185,22 @@ uint64_t snesrecomp_host_now_ns(void) {
 static uint64_t s_interp816_insns;
 static uint64_t s_interp816_cycles;
 uint64_t s_interp816_opcodes_run = 0; /* dev perf: per-bridge-call opcode count */
+
+/* Executions of one chosen address, counted exactly. The WRAM-watch ring is
+ * the wrong instrument for this: at ~2400 events per frame over thousands of
+ * frames it overflows its 16 M entries, and what comes back for a single frame
+ * is the tail of whatever survived - counts of 0, 1 and 1024 for the same
+ * question, none of them real. This is a counter, not a ring.
+ *
+ * Armed with SNESRECOMP_COUNT_PC=<hex>, default 0x009311 which is the VBlank
+ * spin's loop instruction. SNESRECOMP_COUNT_PC_FRAME asks for the count to be
+ * sampled and printed per frame rather than only at exit. */
+uint64_t s_interp_pc_count = 0;
+uint32_t s_interp_pc_watch = 0x009311;
+uint32_t s_interp_pc_frame = 0;
+uint64_t s_interp_pc_frame_base = 0;
+void interp816_set_pc_watch(uint32_t pc24) { s_interp_pc_watch = pc24; s_interp_pc_count = 0; }
+uint64_t interp816_pc_count(void) { return s_interp_pc_count; }
 uint64_t interp816_insns_total(void)  { return s_interp816_insns; }
 uint64_t interp816_cycles_total(void) { return s_interp816_cycles; }
 
@@ -301,6 +317,17 @@ void interp816_opcode_hist_dump(void) {
 int interp816_runOpcode(Interp816* cpu) {
   cpu->cyclesUsed = 0;
   s_interp816_opcodes_run++;
+  {
+    static int s_pcw_on = -1;
+    if (s_pcw_on < 0) {
+      const char *e = getenv("SNESRECOMP_COUNT_PC");
+      s_pcw_on = 1;
+      if (e && e[0]) s_interp_pc_watch = (uint32_t)strtoul(e, NULL, 0);
+    }
+    /* One 24-bit compare per opcode, only when armed. */
+    if ((((uint32_t)cpu->k << 16) | cpu->pc) == s_interp_pc_watch)
+      s_interp_pc_count++;
+  }
   /* getenv() walks the whole environment block on MSVC (~us) - cache it so
    * the hot path pays a branch, not a CRT call, per interpreted instruction.
    * Same value as getenv, so behaviour is bit-identical. */

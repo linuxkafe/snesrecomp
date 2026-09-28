@@ -2426,6 +2426,19 @@ static void interp_profile_dump_atexit(void) {
   if (!HostGetenv("PHASE_MS")) return;
   extern void interp816_bank_hist_dump(void);
   extern void interp816_perf_dump(void);
+  {
+    /* Exact executions of one address over the whole run. A counter, because
+     * the WRAM-watch ring overflows long before a per-frame question can be
+     * answered from it. Frame count is printed beside it so the rate is
+     * arithmetic and not a claim. */
+    extern uint64_t interp816_pc_count(void);
+    extern int snes_frame_counter;
+    uint64_t n = interp816_pc_count();
+    int f = snes_frame_counter;
+    if (f > 0)
+      fprintf(stderr, "[count] pc watched: %llu executions over %d frames = %.1f per frame\n",
+              (unsigned long long)n, f, (double)n / (double)f);
+  }
   fprintf(stderr, "[banks] --- interpreted execution by bank ---\n");
   interp816_bank_hist_dump();
   /* The per-bank view says WHERE the interpreter spends its time; the per-PC
