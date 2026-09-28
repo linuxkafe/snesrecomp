@@ -20,8 +20,17 @@ extern uint8_t g_ram[0x20000];
  * full round trip to establish.
  */
 static const SnesCheat g_cheats[] = {
-  { "money",      "INFINITE MONEY",  "TREASURY", 0, 0, 0, 0,
-    "locate by differential: place a building, diff WRAM, confirm by poke" },
+  /* The one cheat that is verified end to end. Difficulty is a free variable
+   * that changes the starting treasury by a known amount ($20000 vs $10000),
+   * and two runs differing only in that respect differ by 41 bytes of WRAM at
+   * the same frame. Holding 0xBEEF here for the whole city shows $51800 -
+   * 48879 plus the income the game added on top - WITH the game's own
+   * treasury-rising marker lit, so the game believes the number rather than
+   * merely displaying it. $0B9C, one byte below, also moves the display but
+   * is a derived field: it settles at 11700 whatever is written, so it is not
+   * the master and must not be used. */
+  { "money",      "INFINITE MONEY",  "TREASURY", 0x0B9D, 4, 0x0000BEEF, 1,
+    "verified: $20000/$10000 by difficulty, confirmed by a held poke" },
   { "specials",   "SPECIAL BLDGS",   "BUILDING", 0, 0, 0, 0,
     "a bitmask in the building-unlock table; not located" },
   { "pollution",  "NO POLLUTION",    "CITY",     0, 0, 0, 0,
