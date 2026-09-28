@@ -84,8 +84,12 @@ typedef struct Config {
   /* Drive the guest's own d-pad cursor from the host pointer, config.ini
    * [Features] SoftMouse. It was env-only (SNESRECOMP_SOFT_MOUSE), which made
    * it invisible in the config bar and impossible to turn on without editing
-   * a shell profile. Defaults OFF: it is a compatibility shim for a game that
-   * has a cursor but no SNES Mouse support, not something a player expects. */
+   * a shell profile.
+   *
+   * Defaults ON for this port, at the project owner's explicit request. The
+   * framework default is OFF because for most SNES games this is a shim for a
+   * title that has a cursor but no SNES Mouse support, and silently hijacking
+   * the d-pad would surprise the player. */
   bool soft_mouse;
 
   /* [Cheats] <id> = 0|1, one key per cheat id in snes_cheats.c. Persisted as

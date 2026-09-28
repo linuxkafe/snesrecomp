@@ -638,6 +638,14 @@ void ParseConfigFile(const char *filename) {
   g_config.gamepad_deadzone = SNES_CONFIG_DEFAULT_DEADZONE;
   g_config.display_aspect = kSnesDisplayAspect_Crt4x3;
   g_config.skip_launcher = false;
+  /* Soft mouse ON by default for this port, at the project owner's explicit
+   * request. The framework default is OFF because for most SNES games this is
+   * a shim for a title that has a cursor but no SNES Mouse support, and
+   * silently hijacking the d-pad would be surprising. SimCity is the case
+   * where it is wanted: the player reaches for the mouse, the game has a
+   * cursor, and the alternative is a d-pad. Seeded before the file is read so
+   * a config with no [Features] section gets the same behaviour. */
+  g_config.soft_mouse = true;
   /* Default ON to preserve current behaviour across other ports that
    * share this framework code; per-game .ini sets it false where the
    * oracle is incompatible with the repro workflow. See config.h doc. */

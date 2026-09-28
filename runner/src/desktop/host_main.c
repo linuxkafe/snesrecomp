@@ -902,6 +902,13 @@ void ChangeWindowScale(int scale_step) {
   }
   int new_scale = IntMax(IntMin(g_current_window_scale + scale_step, max_scale), 1);
   g_current_window_scale = new_scale;
+  /* The config field is the source of truth the rest of the program reads, and
+   * until now only the boot-time direction existed: config -> current, never
+   * current -> config. So the window resized while every reader of
+   * g_config.window_scale - the configuration bar among them - kept seeing the
+   * value it started with, and the bar read "4X" for ever no matter how much
+   * the player resized. Two variables for one fact, half-wired. */
+  g_config.window_scale = (uint8_t)new_scale;
   int w = new_scale * WindowBaseWidth(g_snes_width);
   int h = new_scale * WindowBaseHeight();
 
