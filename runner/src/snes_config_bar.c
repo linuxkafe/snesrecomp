@@ -129,6 +129,12 @@ static Opt g_options[] = {
   O("CHEATS", "NO POLLUTION",       kOpt_Bool, NULL,            0, 1, 0, 1, 1),
   O("CHEATS", "NO CRIME",           kOpt_Bool, NULL,            0, 1, 0, 1, 1),
   O("CHEATS", "NO TRAFFIC",         kOpt_Bool, NULL,            0, 1, 0, 1, 1),
+
+  /* The soft mouse lives in the bar because the alternative was an environment
+   * variable, which a player cannot see and a launcher cannot set. It is
+   * genuinely live - the mapping is per-frame input, so arming it needs no
+   * restart and no reload. */
+  O("INPUT", "SOFT MOUSE",          kOpt_Bool, NULL,            0, 1, 0, 1, 1),
 };
 static const int g_option_count = (int)(sizeof(g_options) / sizeof(g_options[0]));
 

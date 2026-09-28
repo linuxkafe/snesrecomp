@@ -366,10 +366,31 @@ static int GetIniSection(const char *s) {
   if (StringEqualsNoCase(s, "[Video]") ||
       StringEqualsNoCase(s, "[Emulation]"))
     return 9;
+  /* [Cheats] is read by this core, unlike [Video]/[Emulation] above: a cheat
+   * the player armed should survive the next launch. Each key is the cheat's
+   * id, so the set of keys is exactly the set of rows in the bar. */
+  if (StringEqualsNoCase(s, "[Cheats]"))
+    return 10;
   return -1;
 }
 
 static bool HandleIniConfig(int section, const char *key, char *value) {
+  if (section == 10) {              /* [Cheats] */
+    if (StringEqualsNoCase(key, "Money")) {
+      return ParseBool(value, &g_config.cheat_money);
+    } else if (StringEqualsNoCase(key, "Specials")) {
+      return ParseBool(value, &g_config.cheat_specials);
+    } else if (StringEqualsNoCase(key, "Pollution")) {
+      return ParseBool(value, &g_config.cheat_pollution);
+    } else if (StringEqualsNoCase(key, "Crime")) {
+      return ParseBool(value, &g_config.cheat_crime);
+    } else if (StringEqualsNoCase(key, "Traffic")) {
+      return ParseBool(value, &g_config.cheat_traffic);
+    }
+    /* An id this build does not know is ignored, not fatal: a config written
+     * by a build with more cheats must not stop this one from booting. */
+    return true;
+  }
   if (section == 0) {
     for (int i = 0; i < countof(kKeyNameId); i++) {
       if (StringEqualsNoCase(key, kKeyNameId[i].name)) {
@@ -543,7 +564,9 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
                sizeof(g_config.netplay_player_name), "%s", value);
       return true;
     }
-  } else if (section == 4) {
+  } else if (section == 4) {          /* [Features] */
+    if (StringEqualsNoCase(key, "SoftMouse"))
+      return ParseBool(value, &g_config.soft_mouse);
   }
   return false;
 }

@@ -274,7 +274,13 @@ static int env_int_or(const char *name, int fallback) {
 }
 
 static void soft_mouse_init(void) {
-  g_soft_mouse_enabled = HostGetenv("SOFT_MOUSE") != NULL;
+  /* The env var keeps its meaning as an override so a shell profile still works,
+   and [Features] SoftMouse makes it reachable from the config bar. A bare
+   SNESRECOMP_SOFT_MOUSE=0 is the one case where the env must win, because
+   "not NULL" used to mean on and a user switching it off had no way to. */
+  g_soft_mouse_enabled = g_config.soft_mouse ||
+                         (HostGetenv("SOFT_MOUSE") != NULL &&
+                          atoi(HostGetenv("SOFT_MOUSE")) != 0);
   g_soft_mouse_threshold = env_int_or("SOFT_MOUSE_THRESHOLD", 4);
   g_soft_mouse_pulse = env_int_or("SOFT_MOUSE_PULSE", 2);
   if (g_soft_mouse_enabled) {
@@ -1102,8 +1108,9 @@ static int ConfigBarGet(int idx) {
      * for five toggles would be one more place to look. Row N maps to cheat
      * N-30, and the cheat refuses to arm while its address is unverified - so
      * a row can read ON only for a cheat that is known to work. */
-    case 30: case 31: case 32: case 33: case 34:
+    case 30: case 30 + 1: case 32: case 33: case 34:
       return snes_cheat_is_armed((int)idx - 30);
+    case 35: return g_soft_mouse_enabled;
     default: return 0;
   }
 }
@@ -1123,8 +1130,29 @@ static void ConfigBarSet(int idx, int v) {
     case 19: g_config.disable_frame_delay = v; break;
     case 23: g_config.skip_launcher = v; break;
     case 25: g_config.gamepad_deadzone = v; break;
-    case 30: case 31: case 32: case 33: case 34:
-      snes_cheat_apply((int)idx - 30, v ? 1 : 0);
+    case 30: case 31: case 32: case 33: case 34: {
+      int ci = (int)idx - 30;
+      snes_cheat_apply(ci, v ? 1 : 0);
+      /* Persist so an armed cheat survives the next launch. Written through
+       * the cheat's own field rather than by index, so adding a cheat cannot
+       * silently shift the mapping. */
+      switch (ci) {
+        case 0: g_config.cheat_money = v != 0; break;
+        case 1: g_config.cheat_specials = v != 0; break;
+        case 2: g_config.cheat_pollution = v != 0; break;
+        case 3: g_config.cheat_crime = v != 0; break;
+        case 4: g_config.cheat_traffic = v != 0; break;
+        default: break;
+      }
+      break;
+    }
+    case 35:
+      /* Live: the soft mouse is a pure input mapping, so arming it needs no
+       * restart and no reload of anything. */
+      g_soft_mouse_enabled = v != 0;
+      g_config.soft_mouse = v != 0;
+      g_soft_mouse_primed = 0;
+      memset(&g_soft_mouse, 0, sizeof g_soft_mouse);
       break;
     default: break;   /* the bar never offers a restart-only row for editing */
   }
@@ -1138,10 +1166,24 @@ static const char *ConfigBarCheatNote(int cheat_index) {
 }
 
 static void CheatsInitFromConfig(void) {
-  /* Deliberately does nothing yet. Arming a cheat here would need a
-   * [Cheats] section in config.ini, and persisting a toggle for a cheat that
-   * cannot arm would write a setting that does nothing. The config keys
-   * arrive with the first verified address, not before. */
+  /* One field per cheat, assigned by id rather than by index: a table that
+   * grows must not silently shift which key arms which row. snes_cheat_apply
+   * still refuses an entry whose address is unverified, so a key written for a
+   * cheat this build cannot do is ignored rather than half-applied. */
+  /* Built at runtime, not a static initialiser: these are g_config fields, not
+     compile-time constants. */
+  const struct { const char *id; bool on; } kFromConfig[] = {
+    { "money",     g_config.cheat_money },
+    { "specials",  g_config.cheat_specials },
+    { "pollution", g_config.cheat_pollution },
+    { "crime",     g_config.cheat_crime },
+    { "traffic",   g_config.cheat_traffic },
+  };
+  int i;
+  for (i = 0; i < (int)(sizeof kFromConfig / sizeof kFromConfig[0]); i++) {
+    if (!kFromConfig[i].on) continue;
+    (void)snes_cheat_apply(snes_cheat_find(kFromConfig[i].id), 1);
+  }
 }
 
 static void ConfigBarInit(void) {

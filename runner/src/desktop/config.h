@@ -81,6 +81,24 @@ typedef struct Config {
   // --launcher argument or by setting SkipLauncher = 0 in config.ini.
   bool skip_launcher;
 
+  /* Drive the guest's own d-pad cursor from the host pointer, config.ini
+   * [Features] SoftMouse. It was env-only (SNESRECOMP_SOFT_MOUSE), which made
+   * it invisible in the config bar and impossible to turn on without editing
+   * a shell profile. Defaults OFF: it is a compatibility shim for a game that
+   * has a cursor but no SNES Mouse support, not something a player expects. */
+  bool soft_mouse;
+
+  /* [Cheats] <id> = 0|1, one key per cheat id in snes_cheats.c. Persisted as
+   * data so a player does not have to re-arm in the bar every launch, and so
+   * the keys exist for a cheat to be written into. An id the table does not
+   * know is ignored rather than fatal: a config from a build with more cheats
+   * must not stop this one from booting. */
+  bool cheat_money;
+  bool cheat_specials;
+  bool cheat_pollution;
+  bool cheat_crime;
+  bool cheat_traffic;
+
   /* Netplay display name, persisted so the lobby does not prompt on every
    * launch. Framework-owned (config.ini [Netplay] PlayerName) so every SNES
    * port inherits it — the alternative was a copy of this field in each
