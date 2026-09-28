@@ -1400,19 +1400,6 @@ void WriteReg(uint16 reg, uint8 value) {
     cart_sync_coprocessors(g_snes->cart, g_cpu.master_cycles);
     cart_write(g_snes->cart, 0, reg, value);
   } else if (reg >= 0x2100 && reg < 0x2140) {
-    if (reg == 0x2100) {
-      /* T050-observe: env-gated stream of INIDISP writes ($2100). */
-      extern int snes_frame_counter;
-      extern const char *g_last_recomp_func;
-      extern uint32_t g_interp_wlog_pc24;
-      static int s_tr2100 = -1;
-      if (s_tr2100 < 0) { const char *v = getenv("SNESRECOMP_TRACE2100"); s_tr2100 = (v && v[0] && v[0] != '0'); }
-      if (s_tr2100)
-        fprintf(stderr, "[wr2100] f%d $2100=%02X func=%s interp=%06X\n",
-                snes_frame_counter, value,
-                g_last_recomp_func ? g_last_recomp_func : "<none>",
-                (unsigned)g_interp_wlog_pc24);
-    }
     ppu_write(g_ppu, reg & 0xff, value);
     if (g_snes)
       ppu_rasterRecord(reg, g_snes->vPos, value);
