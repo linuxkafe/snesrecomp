@@ -602,6 +602,10 @@ static void PreparePpuFrame(void) {
 }
 
 // --- Scripted input ---
+// Distinguishes the special script entries from a real button mask. The top
+// bit is always set on a pad mask from the SDL path, so these stay clear of it.
+#define SCRIPT_FLAG_MOUSE 0x08000000u
+
 typedef struct {
   uint32 mask;      // button bits to hold
   int hold_frames;  // frames to hold mask (0 = release)
@@ -609,6 +613,13 @@ typedef struct {
   uint32 poke_addr; // script-only WRAM write address
   uint8 *poke_bytes;
   int poke_count;
+  /* Script-only mouse. SimCity's naming screen is navigated by a pointer, and
+   * the only thing that turns a pointer into input is the soft mouse - so a
+   * script could reach the menu and the naming screen but never finish the
+   * city, which is the whole of T058. These let a script move and click that
+   * pointer without a display attached. */
+  int mdx, mdy;
+  uint8 mleft, mright;
 } ScriptEntry;
 
 typedef struct {
@@ -622,6 +633,12 @@ static int g_script_count;
 static int g_script_index;    // current entry
 static int g_script_phase;    // 0=holding, 1=waiting
 static int g_script_counter;  // frames left in current phase
+/* Virtual mouse, set by the script's mousemove/mouseclick entries and read by
+ * the soft mouse in place of the desktop pointer. Zeroed whenever no entry is
+ * holding, so the real pointer takes over again the moment the script stops
+ * driving it. */
+static int g_vmouse_active, g_vmouse_dx, g_vmouse_dy, g_vmouse_first;
+static uint8 g_vmouse_left, g_vmouse_right;
 static ScriptForcePoke *g_script_force_pokes;
 static int g_script_force_poke_count;
 static int g_script_force_poke_cap;
@@ -725,6 +742,9 @@ static ScriptEntry *NewScriptEntry(int *cap) {
 /* Script grammar, one command per line, `#` comments:
  *   wait N                  frames before the next command
  *   press <buttons> [N]     hold a+b+... for N frames (default 1)
+ *   mousemove <dx> <dy> [N] move the pointer by a delta; the soft mouse turns
+ *                          it into the d-pad pulses a hand would produce
+ *   mouseclick <l|r|lr> [N] hold a mouse button for N frames
  *   loadstate N             load save-state slot N
  *   savestate N             save save-state slot N
  *   poke <addr> <hex>       write WRAM bytes for one frame
@@ -830,6 +850,38 @@ static void LoadScript(const char *path) {
       e->hold_frames = hold;
       e->wait_frames = pending_wait;
       pending_wait = 0;
+    } else if (strcmp(cmd, "mousemove") == 0) {
+      /* An impulse, not a stream: the delta lands on the first frame and the
+       * remaining frames carry zero, so `mousemove 40 0 10` moves the pointer
+       * once and then lets the shim's pulses drain instead of multiplying the
+       * motion by the frame count. */
+      int dx = 0, dy = 0, hold = 2;
+      if (sscanf(line, "%*s %d %d", &dx, &dy) < 2) continue;
+      sscanf(line, "%*s %d %d %d", &dx, &dy, &hold);
+      if (hold < 1) hold = 1;
+      ScriptEntry *e = NewScriptEntry(&cap);
+      e->mask = SCRIPT_FLAG_MOUSE;
+      e->hold_frames = hold;
+      e->wait_frames = pending_wait;
+      e->mdx = dx;
+      e->mdy = dy;
+      pending_wait = 0;
+    } else if (strcmp(cmd, "mouseclick") == 0) {
+      int hold = 2;
+      const char *which = arg1[0] ? arg1 : "left";
+      uint8 left = 0, right = 0;
+      if (strstr(which, "l")) left = 1;
+      if (strstr(which, "r")) right = 1;
+      if (!left && !right) left = 1;
+      if (sscanf(line, "%*s %*s %d", &hold) != 1) hold = 2;
+      if (hold < 1) hold = 1;
+      ScriptEntry *e = NewScriptEntry(&cap);
+      e->mask = SCRIPT_FLAG_MOUSE;
+      e->hold_frames = hold;
+      e->wait_frames = pending_wait;
+      e->mleft = left;
+      e->mright = right;
+      pending_wait = 0;
     } else {
       fprintf(stderr, "script: unknown command '%s'\n", cmd);
     }
@@ -858,6 +910,7 @@ static uint32 TickScript(void) {
     // done waiting — start hold
     g_script_phase = 0;
     g_script_counter = e->hold_frames;
+    g_vmouse_first = 1;
   }
 
   if (g_script_phase == 0) {
@@ -883,9 +936,28 @@ static uint32 TickScript(void) {
           AddScriptForcePoke(e->poke_addr, e->poke_bytes, e->poke_count);
         return 0;
       }
+      if (e->mask & SCRIPT_FLAG_MOUSE) {
+        /* Motion is an impulse: the delta applies to the first held frame and
+         * zero to the rest, so the shim's own threshold and pulse queue decide
+         * how many d-pad presses that motion is worth. Buttons stay held for
+         * the whole entry, which is what makes the click an edge exactly once. */
+        g_vmouse_active = 1;
+        g_vmouse_left = e->mleft;
+        g_vmouse_right = e->mright;
+        g_vmouse_dx = g_vmouse_first ? e->mdx : 0;
+        g_vmouse_dy = g_vmouse_first ? e->mdy : 0;
+        g_vmouse_first = 0;
+        return 0;
+      }
       return e->mask;
     }
     // hold done — advance
+    if (e->mask & SCRIPT_FLAG_MOUSE) {
+      g_vmouse_active = 0;
+      g_vmouse_dx = g_vmouse_dy = 0;
+      g_vmouse_left = g_vmouse_right = 0;
+    }
+    g_vmouse_first = 1;
     g_script_index++;
     if (g_script_index < g_script_count) {
       e = &g_script_entries[g_script_index];
@@ -3792,7 +3864,14 @@ error_reading:;
       uint32 mb = SDL_GetMouseState(&fx, &fy);
       int mx = (int)fx, my = (int)fy;
       int dx, dy;
-      if (!g_soft_mouse_primed) {
+      if (g_vmouse_active) {
+        /* A script is driving the pointer: its motion is already the delta,
+         * there is no absolute position to difference against, and the warp
+         * guard below is for a desktop pointer teleporting under a window
+         * that appeared - a concept that does not exist here. */
+        dx = g_vmouse_dx;
+        dy = g_vmouse_dy;
+      } else if (!g_soft_mouse_primed) {
         g_soft_mouse_last_x = mx;
         g_soft_mouse_last_y = my;
         g_soft_mouse_primed = 1;
@@ -3820,10 +3899,12 @@ error_reading:;
         g_soft_mouse_warps++;
         dx = dy = 0;
       }
+      int sm_left = g_vmouse_active ? (g_vmouse_left != 0)
+                                    : ((mb & SDL_BUTTON_LMASK) != 0);
+      int sm_right = g_vmouse_active ? (g_vmouse_right != 0)
+                                     : ((mb & SDL_BUTTON_RMASK) != 0);
       uint16 bits = 0;
-      joypad_soft_mouse_map(&g_soft_mouse, dx, dy,
-                            (mb & SDL_BUTTON_LMASK) != 0,
-                            (mb & SDL_BUTTON_RMASK) != 0,
+      joypad_soft_mouse_map(&g_soft_mouse, dx, dy, sm_left, sm_right,
                             g_soft_mouse_threshold, g_soft_mouse_pulse, &bits);
       inputs |= bits;
       /* SNESRECOMP_SOFT_MOUSE_LOG=1: one line on the first pulses, then every
