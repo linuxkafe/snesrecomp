@@ -714,7 +714,18 @@ static ScriptEntry *NewScriptEntry(int *cap) {
  *   forcepoke <addr> <hex>  write WRAM bytes every frame from now on */
 static void LoadScript(const char *path) {
   FILE *f = fopen(path, "r");
-  if (!f) { fprintf(stderr, "script: cannot open '%s'\n", path); return; }
+  if (!f) {
+    /* Fatal on purpose. The host chdir()s to the exe dir, so a relative path
+     * that only exists in the caller's cwd is the common case. Continuing
+     * would run the game with NO script: every frame still renders, so the
+     * run looks like a real result while it is only the idle attract. That
+     * silently invalidated a batch of scripted experiments before this was
+     * made fatal. Fail where it is visible instead. */
+    fprintf(stderr, "script: cannot open '%s'\n", path);
+    fprintf(stderr, "script: the host chdir()s to the exe dir; pass an "
+                    "absolute path.\n");
+    exit(2);
+  }
 
   int cap = 64;
   g_script_entries = (ScriptEntry *)malloc(cap * sizeof(ScriptEntry));
