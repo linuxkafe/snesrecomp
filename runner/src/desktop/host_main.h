@@ -149,6 +149,11 @@ int snesrecomp_desktop_main(const SnesDesktopHostGame *game, int argc, char **ar
 /* The last simulated frame's width, as decided by prepare_frame (256 by
  * default). For per-title code that composes against the current frame. */
 int snesrecomp_desktop_frame_width(void);
+/* The presentation aspect currently selected (see display_aspect.h). A game
+ * needs this from prepare_frame: a title whose PPU frame width is a function
+ * of its widescreen margins cannot decide the margin without knowing whether
+ * the player asked for a wide picture or not. */
+int snesrecomp_desktop_display_aspect(void);
 int snesrecomp_desktop_frame_height(void);
 void snesrecomp_desktop_set_widescreen(int enabled);
 

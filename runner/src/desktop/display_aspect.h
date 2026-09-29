@@ -9,6 +9,13 @@ typedef enum SnesDisplayAspect {
   kSnesDisplayAspect_Crt4x3 = 0,
   kSnesDisplayAspect_SquarePixels8x7 = 1,
   kSnesDisplayAspect_SquareFrame1x1 = 2,
+  /* A 16:9 frame from the 256x224 field. Not a pixel shape like the three
+   * above: those all keep the 4:3 framing and only reshape the pixel, while
+   * this one widens the frame itself, so a 16:9 drawable is filled edge to
+   * edge with no pillarboxes. 14/9 is what 256x224 needs: 256 * 14/9 = 398.2,
+   * and 398.2 / 224 is 16:9. Purely presentational - the PPU is untouched and
+   * the guest still rasterises 256 pixels wide. */
+  kSnesDisplayAspect_Wide16x9 = 3,
   kSnesDisplayAspect_Count,
 } SnesDisplayAspect;
 
@@ -24,11 +31,11 @@ static inline SnesDisplayAspect SnesDisplayAspect_Clamp(int value) {
       ? (SnesDisplayAspect)value : kSnesDisplayAspect_Crt4x3;
 }
 /* Horizontal:vertical pixel aspect. A 256x224 frame therefore presents as
- * 4:3, 8:7, or 1:1 respectively. */
+ * 4:3, 8:7, 1:1, or 16:9 respectively. */
 static inline void SnesDisplayAspect_GetPixelAspect(
     SnesDisplayAspect aspect, int *numerator, int *denominator) {
-  static const uint8_t kNumerators[kSnesDisplayAspect_Count] = {7, 1, 7};
-  static const uint8_t kDenominators[kSnesDisplayAspect_Count] = {6, 1, 8};
+  static const uint8_t kNumerators[kSnesDisplayAspect_Count] = {7, 1, 7, 14};
+  static const uint8_t kDenominators[kSnesDisplayAspect_Count] = {6, 1, 8, 9};
   aspect = SnesDisplayAspect_Clamp((int)aspect);
   if (numerator) *numerator = kNumerators[aspect];
   if (denominator) *denominator = kDenominators[aspect];

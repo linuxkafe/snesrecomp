@@ -501,6 +501,12 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
                  StringEqualsNoCase(value, "SquareFrame") ||
                  StringEqualsNoCase(value, "2")) {
         g_config.display_aspect = kSnesDisplayAspect_SquareFrame1x1;
+      } else if (StringEqualsNoCase(value, "16:9") ||
+                 StringEqualsNoCase(value, "16x9") ||
+                 StringEqualsNoCase(value, "Wide") ||
+                 StringEqualsNoCase(value, "Widescreen") ||
+                 StringEqualsNoCase(value, "3")) {
+        g_config.display_aspect = kSnesDisplayAspect_Wide16x9;
       } else {
         return false;
       }

@@ -318,6 +318,9 @@ static bool g_reset_clock;
 static double g_simulation_hz = SNES_HOST_NTSC_HZ;
 
 int snesrecomp_desktop_frame_width(void) { return g_snes_width > 0 ? g_snes_width : 256; }
+int snesrecomp_desktop_display_aspect(void) {
+  return (int)SnesDisplayAspect_Clamp(g_config.display_aspect);
+}
 int snesrecomp_desktop_frame_height(void) { return g_snes_height > 0 ? g_snes_height : 224; }
 void snesrecomp_desktop_request_clock_reset(void) { g_reset_clock = true; }
 
@@ -390,7 +393,19 @@ static double WantedPresentationHz(double refresh) {
 }
 static bool PresentationDecoupled(void) { return WantedPresentationHz(0) > 0; }
 
+static int WindowBaseHeight(void);
 static int WindowBaseWidth(int frame_w) {
+  /* 16:9 first, ahead of the per-title hook. Left at the 4:3 base the viewport
+   * would be 16:9 inside a 4:3 window, which is a widescreen picture with
+   * pillarboxes on both sides - the exact thing the mode exists to remove. */
+  if (g_config.display_aspect == kSnesDisplayAspect_Wide16x9) {
+    /* The base is 256, not frame_w: in this mode the PPU frame is the
+     * authentic 256 and frame_w still carries the old margin width until the
+     * first prepare_frame corrects it. */
+    int wide = SnesDisplayAspect_ComputeWindowWidth(
+        256, g_snes_height, WindowBaseHeight(), kSnesDisplayAspect_Wide16x9);
+    if (wide > 0) return wide;
+  }
   if (g_game->window_base_width) return g_game->window_base_width(frame_w);
   /* 4:3 on a 240-line window: 256 -> 320. */
   return (frame_w * 5 + 2) / 4;
@@ -2564,7 +2579,12 @@ int snesrecomp_desktop_main(const SnesDesktopHostGame *game, int argc, char **ar
   else
     snprintf(g_launcher_title, sizeof(g_launcher_title), "%s \xE2\x80\x94 Launcher", game->display_name);
   g_simulation_hz = game->simulation_hz > 0 ? game->simulation_hz : SNES_HOST_NTSC_HZ;
+  /* The window is created from this before the first prepare_frame runs, so a
+   * title whose frame_width encodes its widescreen margins has to be told
+   * here too or the window comes up the wrong shape and the first frame
+   * corrects it visibly. 16:9 wants the authentic 256, not the margin width. */
   g_snes_width = game->frame_width > 0 ? game->frame_width : 256;
+  if (g_config.display_aspect == kSnesDisplayAspect_Wide16x9) g_snes_width = 256;
   g_snes_height = game->frame_height > 0 ? game->frame_height : 224;
   const char *build_version = game->build_version ? game->build_version : "dev";
 
@@ -4074,7 +4094,17 @@ static void HandleCommand(uint32 j, bool pressed) {
                   (g_ppu_render_flags & kPpuRenderFlags_NewRenderer) != 0;
       break;
     case kKeys_ToggleWidescreen:
-      printf("Widescreen is a per-title presentation setting; see the launcher's Mods page.\n");
+      /* Was a stub that printed a pointer to the launcher's Mods page. The
+       * per-title PPU widescreen is still not something this host turns on -
+       * the guest stays 256 wide - but the 16:9 presentation is now a real
+       * choice, and that is what a player pressing this wants. */
+      g_config.display_aspect =
+          g_config.display_aspect == kSnesDisplayAspect_Wide16x9
+              ? kSnesDisplayAspect_Crt4x3
+              : kSnesDisplayAspect_Wide16x9;
+      /* WindowBaseWidth now answers differently, so the window has to be
+       * re-laid-out or it keeps the old shape around a new picture. */
+      ChangeWindowScale(0);
       break;
     case kKeys_VolumeUp:
     case kKeys_VolumeDown: HandleVolumeAdjustment(j == kKeys_VolumeUp ? 1 : -1); break;
