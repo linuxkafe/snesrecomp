@@ -90,11 +90,19 @@ static void test_no_tap_unchanged(void)
         "no-tap reads past bit 15 report 1");
 
   /* Automatic read registers still answer from live pad state with no tap,
-   * so a game that never enables the automatic-read handshake keeps working. */
+   * so a game that never enables the automatic-read handshake keeps working.
+   *
+   * A is bit 8 of the runner state, so it is Data2 and belongs at $4219,
+   * with $4218 clear. This assertion used to read $4218 == 0x80, which is what
+   * the bit-reversed automatic read produced; it was a guard on the
+   * pre-multitap value, not a claim about hardware, and the value it captured
+   * has since been corrected along with the translation itself. */
   reset_all(&s, 0, 0);
   s.input1_currentState = BTN_A;
-  check(joypad_auto_read_reg_addr(&s, 0x4218) == 0x80,
-        "no-tap $4218 matches the pre-multitap value");
+  check(joypad_auto_read_reg_addr(&s, 0x4218) == 0x00,
+        "no-tap $4218 carries Data1, which A is not in");
+  check(joypad_auto_read_reg_addr(&s, 0x4219) == 0x01,
+        "no-tap $4219 carries A");
   check(joypad_auto_read_reg_addr(&s, 0x421c) == 0x00,
         "no-tap $421C (Data2) reads 0");
 }

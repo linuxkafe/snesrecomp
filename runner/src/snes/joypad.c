@@ -706,20 +706,25 @@ uint8_t joypad_auto_read_reg_addr(Snes *snes, uint16_t reg)
         log_cap = (e && e[0]) ? (int)strtol(e, NULL, 0) : 0;
     }
     if (log_cap > 0 && log_count < log_cap) {
-        extern int snes_frame_counter;
         uint16_t st = (uint16_t)(snes ? snes->input1_currentState : 0);
         uint16_t w;
         /* Only while something is held. The game auto-reads about once a
          * frame, so logging every read spends the whole cap on idle frames
-         * and the presses never reach it. */
+         * and the presses never reach it.
+         *
+         * No frame counter, deliberately: this file is linked on its own by
+         * three tests, and taking snes_frame_counter from outside turned that
+         * into a link error for every one of them. The register, the value and
+         * both sides of the translation are what the diagnostic is for, and
+         * none of them needs the host. */
         if (st == 0)
             return v;
         w = joypad_auto_read_word(st);
         log_count++;
         fprintf(stderr,
-                "[joyread] f=%d reg=$%04X -> %02X  (p1 host state $%04X, "
+                "[joyread] reg=$%04X -> %02X  (p1 host state $%04X, "
                 "reversed word $%04X: lo=%02X hi=%02X)\n",
-                snes_frame_counter, reg, v, st, w,
+                reg, v, st, w,
                 (unsigned)(w & 0xffu), (unsigned)(w >> 8));
     }
     return v;

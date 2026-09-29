@@ -113,12 +113,31 @@ int main(void) {
   int w = 336, h = 224;
   int i;
 
-  /* ---- the bar is up without being asked for ------------------------- */
+  /* ---- hidden until F1, then up --------------------------------------- */
+  /* F1 opens the bar and it is not up by default: it covers 21 of the
+   * field's 224 rows. So the first thing to pin is that a fresh init draws
+   * NOTHING, which is the half of the contract the old default hid. */
   reset(fb, w, h);
-  check(!snes_config_bar_expanded(), "bar defaults to the compact form");
+  check(!snes_config_bar_visible(), "the bar starts hidden");
   snes_config_bar_draw(fb, w * 4, w, h);
-  check(g_fill_calls > 0, "compact bar draws something by default");
-  check(g_text_n > 0, "compact bar writes text by default");
+  check(g_fill_calls == 0, "a hidden bar draws nothing at all");
+  check(g_text_n == 0, "a hidden bar writes no text");
+
+  /* F1 opens it as the full list. */
+  snes_config_bar_toggle_visible();
+  check(snes_config_bar_visible(), "F1 shows the bar");
+  check(snes_config_bar_expanded(), "F1 opens the list, not the summary");
+  snes_config_bar_toggle_visible();
+  check(!snes_config_bar_visible(), "F1 closes it again");
+
+  /* ---- the compact form, now that it has been asked for --------------- */
+  reset(fb, w, h);
+  snes_config_bar_toggle_visible();
+  snes_config_bar_toggle_expanded();
+  check(!snes_config_bar_expanded(), "bar collapses to the compact form");
+  snes_config_bar_draw(fb, w * 4, w, h);
+  check(g_fill_calls > 0, "compact bar draws something when shown");
+  check(g_text_n > 0, "compact bar writes text when shown");
   check(g_fill_max_w == w, "something spans the full frame width");
 
   /* ---- every button label fits its cell ------------------------------- */
@@ -165,8 +184,8 @@ int main(void) {
 
   /* ---- the expanded list selects and edits ---------------------------- */
   reset(fb, w, h);
-  snes_config_bar_toggle_expanded();
-  check(snes_config_bar_expanded(), "F1 expands the bar");
+  snes_config_bar_toggle_visible();
+  check(snes_config_bar_expanded(), "the bar expands once shown");
   snes_config_bar_draw(fb, w * 4, w, h);
 
   {
