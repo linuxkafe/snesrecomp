@@ -244,6 +244,9 @@ static uint32 g_input_state;
  * feeds the last frame's host pointer deltas into the joypad layer. */
 static bool g_mouse_enabled;
 static int g_mouse_last_x, g_mouse_last_y;
+/* Sub-field-pixel motion carried between frames, so a slow drag still moves
+ * the guest counter instead of rounding to zero every frame. */
+static int g_mouse_remainder, g_mouse_rem_y;
 
 /* Soft mouse (SNESRECOMP_SOFT_MOUSE=1): the PC pointer driving the GUEST'S
  * OWN d-pad cursor. Distinct from g_mouse_enabled above, which is the SNES
@@ -252,6 +255,13 @@ static int g_mouse_last_x, g_mouse_last_y;
  * cooperation from the game: it synthesises the presses the cursor consumes.
  * See joypad.h for the mapping and why the buttons are taps, not holds. */
 static bool g_soft_mouse_enabled;
+/* Set when a real SNES Mouse is plugged in. The shim and the peripheral are
+ * two answers to the same question on the SAME port, and joypad_set_device
+ * refuses a mouse on a port a tap already owns - so leaving both on is not a
+ * fallback, it is a fight: the shim's d-pad pulses unplug the mouse, and the
+ * mouse's buttons arrive on a port already being pulsed. Set by the MOUSE
+ * block, which runs before soft_mouse_init. */
+static bool g_soft_mouse_suppressed;
 static SoftMouseState g_soft_mouse;
 static int g_soft_mouse_threshold;   /* pointer px per virtual press */
 static int g_soft_mouse_pulse;       /* frames each press is held */
@@ -289,6 +299,11 @@ static void soft_mouse_init(void) {
   }
   g_soft_mouse_threshold = env_int_or("SOFT_MOUSE_THRESHOLD", 4);
   g_soft_mouse_pulse = env_int_or("SOFT_MOUSE_PULSE", 2);
+  if (g_soft_mouse_enabled && g_soft_mouse_suppressed) {
+    g_soft_mouse_enabled = false;
+    host_report_breadcrumb("soft mouse: off (a real SNES Mouse is plugged "
+                           "into port 2; the shim would unplug it)");
+  }
   if (g_soft_mouse_enabled) {
     /* The anchor is NOT taken here. This runs before the window exists, and
      * the pointer is somewhere unhelpful at that moment; by the first frame it
@@ -3203,6 +3218,7 @@ error_reading:;
       { float ax = 0.0f, ay = 0.0f; SDL_GetMouseState(&ax, &ay);
         g_mouse_last_x = (int)ax; g_mouse_last_y = (int)ay; }
       snesrecomp_sdl_show_cursor(false);
+      g_soft_mouse_suppressed = true;
       host_report_breadcrumb("SNES Mouse enabled on port 2 (player 2)");
     }
   }
@@ -3859,9 +3875,28 @@ error_reading:;
       int x, y;
       uint32 buttons = SDL_GetMouseState(&xf, &yf);
       x = (int)xf; y = (int)yf;
-      joypad_set_mouse(1, x - g_mouse_last_x, y - g_mouse_last_y,
-                       (buttons & SDL_BUTTON_LMASK) != 0,
-                       (buttons & SDL_BUTTON_RMASK) != 0);
+      /* The pointer is in WINDOW pixels and the guest's counter is in FIELD
+       * pixels, so the raw delta moves the guest cursor by the window scale:
+       * at scale 3 a one-pixel nudge of the real mouse crossed three guest
+       * pixels, the 7-bit counter saturated almost immediately, and the
+       * on-screen hand drifted somewhere the player never put it. The SNES
+       * Mouse is a relative device and this is the relative displacement it
+       * would report, so the fix is to convert units, not to change the
+       * model: one window pixel becomes one field pixel. Accumulating the
+       * remainder keeps sub-pixel-per-frame motion from rounding to nothing,
+       * which is most of a slow drag. */
+      int field_scale = g_current_window_scale > 0 ? g_current_window_scale : 1;
+      g_mouse_remainder += x - g_mouse_last_x;
+      g_mouse_rem_y += y - g_mouse_last_y;
+      {
+        int dx = g_mouse_remainder / field_scale;
+        int dy = g_mouse_rem_y / field_scale;
+        g_mouse_remainder -= dx * field_scale;
+        g_mouse_rem_y -= dy * field_scale;
+        joypad_set_mouse(1, dx, dy,
+                         (buttons & SDL_BUTTON_LMASK) != 0,
+                         (buttons & SDL_BUTTON_RMASK) != 0);
+      }
       g_mouse_last_x = x;
       g_mouse_last_y = y;
     }
