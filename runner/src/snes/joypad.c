@@ -615,23 +615,10 @@ uint16_t joypad_auto_read_word(uint16_t state)
     return word;
 }
 
-/* The automatic read serves the controller's two data registers in the order
- * the hardware presents them, which is the order every other name in this tree
- * uses: Data1 ($4218/$421C) is B,Y,Select,Start,Up,Down,Left,Right and Data2
- * ($4219/$421D) is A,X,L,R.
- *
- * It used to serve them bit-reversed, on the reading that the first bit the
- * serial shift clocks out is the low bit. That is true of the SHIFT path, whose
- * word really is assembled first-bit-into-bit-15 - and joypad_auto_read_word is
- * still what builds that word. It is not true of the automatic read, which a
- * game polls as plain registers: it got B at Data1 bit 7 instead of bit 0, and
- * Left at Data1 bit 1 instead of bit 6, so every button landed where the game
- * was not looking. The directions half-survived because a bit-reversed
- * direction is still a direction, which is exactly what made the bug look like
- * a missing state transition rather than a broken joypad. */
 uint8_t joypad_auto_read_reg(uint16_t state, unsigned reg)
 {
-    return (uint8_t)((reg & 1u) ? (state >> 8) : (state & 0xffu));
+    uint16_t word = joypad_auto_read_word(state);
+    return (uint8_t)((reg & 1u) ? (word >> 8) : (word & 0xffu));
 }
 
 /* The 16-bit prefix of the mouse stream in hardware register order (first
