@@ -4219,7 +4219,31 @@ static void HandleCommand(uint32 j, bool pressed) {
   }
 }
 
+/* Quicksave / quickload, one keypress, no browser.
+ *
+ * F11 opens the state browser, which is right for browsing twenty slots and
+ * wrong for the thing you actually want when measuring something: it needs a
+ * slot chosen, and the guest is frozen while it is open. That is a place to
+ * hesitate, and hesitating there is expensive - two rounds of measurement were
+ * spent on states that were never written, and the failure was invisible,
+ * because closing the browser looks exactly like saving. One key, one slot,
+ * one log line saying it happened. */
+static void HandleQuicksave(int keyCode) {
+  if (keyCode == SDLK_F5) {
+    RtlSaveLoad(kSaveLoad_Save, 0);
+    host_report_breadcrumb("quicksave written to slot 0");
+  } else if (keyCode == SDLK_F9) {
+    RtlSaveLoad(kSaveLoad_Load, 0);
+    host_report_breadcrumb("quickload from slot 0");
+  }
+}
+
 static void HandleInput(int keyCode, int keyMod, bool pressed) {
+  if (pressed) {
+    HandleQuicksave(keyCode);
+    /* Not a return: the key can also be bound to a command, and a slot-0
+     * save should not eat the binding. */
+  }
   int j = FindCmdForSdlKey(keyCode, (SDL_Keymod)keyMod);
   if (j != 0)
     HandleCommand(j, pressed);
