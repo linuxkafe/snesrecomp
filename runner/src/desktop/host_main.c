@@ -277,10 +277,16 @@ static void soft_mouse_init(void) {
   /* The env var keeps its meaning as an override so a shell profile still works,
    and [Features] SoftMouse makes it reachable from the config bar. A bare
    SNESRECOMP_SOFT_MOUSE=0 is the one case where the env must win, because
-   "not NULL" used to mean on and a user switching it off had no way to. */
-  g_soft_mouse_enabled = g_config.soft_mouse ||
-                         (HostGetenv("SOFT_MOUSE") != NULL &&
-                          atoi(HostGetenv("SOFT_MOUSE")) != 0);
+   "not NULL" used to mean on and a user switching it off had no way to.
+
+   The override has to decide both ways, not just "on": the config default for
+   SoftMouse is on, so an OR could never let the env turn it off, which is the
+   one case this comment promises. Present-and-zero now means off. */
+  {
+    const char *sm_env = HostGetenv("SOFT_MOUSE");
+    g_soft_mouse_enabled = (sm_env && sm_env[0]) ? (atoi(sm_env) != 0)
+                                                  : (g_config.soft_mouse != 0);
+  }
   g_soft_mouse_threshold = env_int_or("SOFT_MOUSE_THRESHOLD", 4);
   g_soft_mouse_pulse = env_int_or("SOFT_MOUSE_PULSE", 2);
   if (g_soft_mouse_enabled) {
