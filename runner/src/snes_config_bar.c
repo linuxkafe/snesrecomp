@@ -43,6 +43,10 @@ static int (*g_renderer_current)(void);
 static void (*g_renderer_choose)(int index);
 static const char *(*g_cheat_note)(int cheat_index);
 static int g_expanded;
+/* F1 opens the bar; it is not up by default. The bar covers 21 of the field's
+ * 224 rows, and a player who never changes a setting should not pay for that
+ * on every frame of play. */
+static int g_visible;
 static int g_sel;
 static int g_first;
 static int g_layout_w;
@@ -209,11 +213,13 @@ void snes_config_bar_init(const SnesConfigBarHooks *hooks,
   if (hooks) g_hooks = *hooks;
   g_get = get_value;
   g_set = set_value;
-  /* SNESRECOMP_CONFIG_BAR=1 starts with the full list open. It exists so a
-   * headless screenshot can reach the expanded layout, which is otherwise only
-   * reachable by pressing a key on a machine that has a keyboard. */
+  /* SNESRECOMP_CONFIG_BAR=1 starts visible with the full list open. It exists
+   * so a headless screenshot can reach the expanded layout, which is otherwise
+   * only reachable by pressing a key on a machine that has a keyboard, and it
+   * is also the escape hatch for anyone who wants the bar up permanently now
+   * that F1 opens it on demand. */
   e = getenv("SNESRECOMP_CONFIG_BAR");
-  g_expanded = (e && *e == '1') ? 1 : 0;
+  g_visible = g_expanded = (e && *e == '1') ? 1 : 0;
   g_sel = 0;
   /* SNESRECOMP_CONFIG_BAR_SEL=<n>: start the selection on row n. The bar's nav
    * reads the real keyboard, which a headless run has no way to press, so
@@ -232,6 +238,15 @@ void snes_config_bar_init(const SnesConfigBarHooks *hooks,
 }
 
 void snes_config_bar_toggle_expanded(void) { g_expanded = !g_expanded; }
+/* F1: hidden becomes the full list, the full list becomes hidden. Opening
+ * shows the list rather than the one-line summary, because the summary's only
+ * job is to say that a key exists, and if you pressed the key you know it
+ * exists. */
+void snes_config_bar_toggle_visible(void) {
+  if (!g_visible) { g_visible = 1; g_expanded = 1; }
+  else            { g_visible = 0; g_expanded = 0; }
+}
+int  snes_config_bar_visible(void) { return g_visible; }
 int  snes_config_bar_expanded(void) { return g_expanded; }
 int  snes_config_bar_selected(void) { return g_sel; }
 int  snes_config_bar_row_count(void) { return g_option_count; }
@@ -340,6 +355,7 @@ void snes_config_bar_draw(uint8_t *dst, int pitch, int dst_w, int dst_h) {
   (void)pitch;
 
   if (dst_w <= 0 || dst_h <= 0 || !g_get) return;
+  if (!g_visible) return;
   g_layout_w = dst_w;
 
   snes_ovl_fill_rect(px, dst_w, dst_h, 0, 0, dst_w, COMPACT_H, BAR_BG);

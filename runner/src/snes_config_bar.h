@@ -5,17 +5,19 @@
 #include "snes_overlay_draw.h"
 
 /*
- * The configuration bar: every option config.ini can set, on screen, always.
+ * The configuration bar: every option config.ini can set, on screen, on F1.
  *
- * This is NOT a settings menu. It is a bar that is up by default and shows
- * what the current configuration IS, because the alternatives were both
- * worse: reading config.ini means leaving the game, and the launcher means
- * restarting. A user who does not know the keys otherwise has no way to find
- * out that a setting is wrong.
+ * This is NOT a settings menu. It is a bar that shows what the current
+ * configuration IS, because the alternatives were both worse: reading
+ * config.ini means leaving the game, and the launcher means restarting. A user
+ * who does not know the keys otherwise has no way to find out that a setting is
+ * wrong.
  *
- * F1 expands it from the summary strip to the full grouped list. In the full
- * list Up/Down select a row and Left/Right change it; the mouse works on both
- * forms for the command buttons, and on the rows in the full list.
+ * F1 opens it and F1 closes it. It is not up by default: it covers 21 of the
+ * field's 224 rows, and a player who never changes a setting should not pay
+ * for that on every frame. In the full list Up/Down select a row and
+ * Left/Right change it; the mouse works on both forms for the command buttons,
+ * and on the rows in the full list.
  *
  * The bar knows nothing about HOW anything is applied. Everything that
  * touches a window, a device or a renderer arrives through the hooks the host
@@ -101,7 +103,9 @@ void snes_config_bar_init(const SnesConfigBarHooks *hooks,
  * host. */
 void snes_config_bar_draw(uint8_t *dst, int pitch, int dst_w, int dst_h);
 
-/* The bar is visible by default; F1 toggles the full list. */
+/* F1 toggles the bar's visibility; opening it shows the full list. */
+void snes_config_bar_toggle_visible(void);
+int  snes_config_bar_visible(void);
 void snes_config_bar_toggle_expanded(void);
 int  snes_config_bar_expanded(void);
 

@@ -3462,7 +3462,7 @@ error_reading:;
          * as a raw keycode so it works before a config.ini exists, which is
          * exactly when a user needs to see the configuration. */
         if (SNESRECOMP_SDL_EVENT_KEY(event) == SDLK_F1) {
-          snes_config_bar_toggle_expanded();
+          snes_config_bar_toggle_visible();
           break;
         }
         HandleInput(SNESRECOMP_SDL_EVENT_KEY(event),
