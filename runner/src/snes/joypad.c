@@ -615,10 +615,23 @@ uint16_t joypad_auto_read_word(uint16_t state)
     return word;
 }
 
+/* The automatic read serves the controller's two data registers in the order
+ * the hardware presents them, which is the order every other name in this tree
+ * uses: Data1 ($4218/$421C) is B,Y,Select,Start,Up,Down,Left,Right and Data2
+ * ($4219/$421D) is A,X,L,R.
+ *
+ * It used to serve them bit-reversed, on the reading that the first bit the
+ * serial shift clocks out is the low bit. That is true of the SHIFT path, whose
+ * word really is assembled first-bit-into-bit-15 - and joypad_auto_read_word is
+ * still what builds that word. It is not true of the automatic read, which a
+ * game polls as plain registers: it got B at Data1 bit 7 instead of bit 0, and
+ * Left at Data1 bit 1 instead of bit 6, so every button landed where the game
+ * was not looking. The directions half-survived because a bit-reversed
+ * direction is still a direction, which is exactly what made the bug look like
+ * a missing state transition rather than a broken joypad. */
 uint8_t joypad_auto_read_reg(uint16_t state, unsigned reg)
 {
-    uint16_t word = joypad_auto_read_word(state);
-    return (uint8_t)((reg & 1u) ? (word >> 8) : (word & 0xffu));
+    return (uint8_t)((reg & 1u) ? (state >> 8) : (state & 0xffu));
 }
 
 /* The 16-bit prefix of the mouse stream in hardware register order (first
@@ -672,7 +685,47 @@ void joypad_auto_read(Snes *snes)
     g_jp.auto_valid = 1;
 }
 
+/* SNESRECOMP_JOYPAD_READ_LOG=<n>: log the first n automatic-read register
+ * reads, one line each, with BOTH sides of the translation on it - the state
+ * the host asked for and the byte the game is handed. One line answers the
+ * question this diagnostic exists for: if the host set a button and the
+ * served byte does not contain it, the loss is in this function; if the byte
+ * carries it and the game still ignores it, the game is reading a different
+ * register or a different bit. Off by default, and the check is one branch
+ * against a static. */
+static uint8_t joypad_auto_read_reg_addr_inner(Snes *snes, uint16_t reg);
+
 uint8_t joypad_auto_read_reg_addr(Snes *snes, uint16_t reg)
+{
+    static int log_cap = -1;
+    static long log_count;
+    uint8_t v = joypad_auto_read_reg_addr_inner(snes, reg);
+
+    if (log_cap < 0) {
+        const char *e = getenv("SNESRECOMP_JOYPAD_READ_LOG");
+        log_cap = (e && e[0]) ? (int)strtol(e, NULL, 0) : 0;
+    }
+    if (log_cap > 0 && log_count < log_cap) {
+        extern int snes_frame_counter;
+        uint16_t st = (uint16_t)(snes ? snes->input1_currentState : 0);
+        uint16_t w;
+        /* Only while something is held. The game auto-reads about once a
+         * frame, so logging every read spends the whole cap on idle frames
+         * and the presses never reach it. */
+        if (st == 0)
+            return v;
+        w = joypad_auto_read_word(st);
+        log_count++;
+        fprintf(stderr,
+                "[joyread] f=%d reg=$%04X -> %02X  (p1 host state $%04X, "
+                "reversed word $%04X: lo=%02X hi=%02X)\n",
+                snes_frame_counter, reg, v, st, w,
+                (unsigned)(w & 0xffu), (unsigned)(w >> 8));
+    }
+    return v;
+}
+
+static uint8_t joypad_auto_read_reg_addr_inner(Snes *snes, uint16_t reg)
 {
     int slot;
 

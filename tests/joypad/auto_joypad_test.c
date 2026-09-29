@@ -30,23 +30,29 @@ static int expect_auto_word(uint16_t state, unsigned base, uint16_t expected,
 int main(void) {
   int fails = 0;
 
-  /* Runner input state is the serial joypad order:
-   * B,Y,Select,Start,Up,Down,Left,Right,A,X,L,R.
+  /* Runner input state is B,Y,Select,Start,Up,Down,Left,Right,A,X,L,R - the
+   * same order Data1 and Data2 are named everywhere else in this tree.
    *
-   * SNES automatic joypad registers store the first serial bit in bit 15 of
-   * the 16-bit word at $4218/$4219:
-   *   high byte $4219: B,Y,Select,Start,Up,Down,Left,Right
-   *   low byte  $4218: A,X,L,R,0,0,0,0
+   * The automatic read hands a game those two registers PLAIN:
+   *   $4218 (Data1): B,Y,Select,Start,Up,Down,Left,Right
+   *   $4219 (Data2): A,X,L,R
+   *
+   * These expectations used to be bit-reversed, on the reading that the
+   * automatic read shares the serial shift's order. It does not, and the code
+   * followed the test: B arrived at Data1 bit 7 instead of bit 0 and Left at
+   * bit 1 instead of bit 6. SimCity - which T042 measured to be auto-read-only
+   * - therefore read a d-pad that half-worked and buttons that did nothing at
+   * all, and the city never started simulating.
    */
-  fails += expect_auto_word(1u << 6, 0x4218, 0x0200, "p1 left");
+  fails += expect_auto_word(1u << 6, 0x4218, 0x0040, "p1 left");
 
-  fails += expect_auto_word(1u << 8, 0x4218, 0x0080, "p1 A");
+  fails += expect_auto_word(1u << 8, 0x4218, 0x0100, "p1 A");
 
   fails += expect_auto_word((1u << 0) | (1u << 7) | (1u << 11),
-                            0x4218, 0x8110, "p1 B+Right+R");
+                            0x4218, 0x0881, "p1 B+Right+R");
 
   fails += expect_auto_word((1u << 5) | (1u << 9),
-                            0x421a, 0x0440, "p2 Down+X");
+                            0x421a, 0x0220, "p2 Down+X");
 
   if (fails) return 1;
   puts("auto_joypad_test: PASS");
