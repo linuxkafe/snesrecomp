@@ -915,6 +915,25 @@ static InterpHistEnt s_interp_hist[PROFILE_HIST_CAP];
 static long s_interp_prof_start = -1;
 static long s_interp_prof_end = -1;
 static long s_interp_ppu_start_frame = -1;   /* bracket for per-frame PPU split */
+/* Full per-bank PC dump (2026-10-02). `interp_hist_dump` prints only the top 60
+ * PCs by host-ms, so a bank with 921 distinct PCs answers nothing about whether
+ * ONE address is among them -- which is exactly the question C-041 asks about
+ * $03:8026. SNESRECOMP_INTERP_DUMP_BANK=03 prints EVERY entry in that bank with
+ * its step count, ascending by PC. Dev-only, same #ifdef as the histogram. */
+static int s_interp_dump_bank = -1;
+/* Windowed execution stream (2026-10-02). SNESRECOMP_INTERP_TRACE_FRAMES="lo-hi"
+ * (decimal host frames, like SNESRECOMP_AOTBLK) prints EVERY interpreted PC
+ * executed in that window, in execution order, all banks -- so the last
+ * instruction before a bank falls silent and the PC it transferred to are both
+ * in the log. Interleave with SNESRECOMP_AOTBLK over the same frame window for
+ * the AOT tier. Windowless by default; the check is two compares. */
+static int s_interp_trace_on = -1;
+static long s_interp_trace_lo = -1, s_interp_trace_hi = -1;
+static int by_pc(const void *a, const void *b) {
+    const uint32_t pa = ((const InterpHistEnt *)a)->pc24;
+    const uint32_t pb = ((const InterpHistEnt *)b)->pc24;
+    return pa < pb ? -1 : (pa > pb ? 1 : 0);
+}
 static void interp_hist_add(uint32_t pc24) {
     uint32_t h = (pc24 * 2654435761u) & (PROFILE_HIST_CAP - 1);
     for (unsigned i = 0; i < PROFILE_HIST_CAP; i++) {
@@ -978,6 +997,31 @@ static void interp_hist_dump(void) {
         if (bank_pcs[b])
             fprintf(stderr, "  $%02X  %5u PCs  %12llu steps\n", b, bank_pcs[b],
                     (unsigned long long)bank_steps[b]);
+    /* Full dump of one bank, ascending by PC. The top-60 list above CANNOT
+     * answer "is address X among this bank's PCs", and that question is the
+     * whole point of the instrument (C-041). Counts here are step counts over
+     * the profile window; the per-bank totals above must equal the sums. */
+    if (s_interp_dump_bank >= 0) {
+        unsigned nb = 0;
+        unsigned long long nsteps = 0;
+        InterpHistEnt *rows = malloc(PROFILE_HIST_CAP * sizeof *rows);
+        if (rows) {
+            for (unsigned i = 0; i < PROFILE_HIST_CAP; i++)
+                if (s_interp_hist[i].n &&
+                    (int)((s_interp_hist[i].pc24 >> 16) & 0xff) == s_interp_dump_bank) {
+                    rows[nb++] = s_interp_hist[i];
+                    nsteps += s_interp_hist[i].n;
+                }
+            qsort(rows, nb, sizeof *rows, by_pc);
+            fprintf(stderr, "\n[interp_dump_bank] $%02X: %u distinct PCs, %llu steps"
+                            " (profile window only):\n",
+                    (unsigned)s_interp_dump_bank, nb, nsteps);
+            for (unsigned i = 0; i < nb; i++)
+                fprintf(stderr, "  $%06X  %12llu\n", (unsigned)rows[i].pc24,
+                        (unsigned long long)rows[i].n);
+            free(rows);
+        }
+    }
     fprintf(stderr,
         "\n[ppu_split] frames=%ld facade=%.1fms => phases per frame:\n",
         nframes, (ln + hd) / nframes);
@@ -1001,6 +1045,12 @@ static void interp_hist_init(void) {
         const char *e = getenv("SNESRECOMP_INTERP_PROFILE_END");
         if (s && *s) s_interp_prof_start = strtol(s, NULL, 0);
         if (e && *e) s_interp_prof_end = strtol(e, NULL, 0);
+        const char *b = getenv("SNESRECOMP_INTERP_DUMP_BANK");
+        if (b && *b) s_interp_dump_bank = (int)strtol(b, NULL, 0) & 0xff;
+        const char *tf = getenv("SNESRECOMP_INTERP_TRACE_FRAMES");
+        if (tf && *tf && sscanf(tf, "%ld-%ld", &s_interp_trace_lo,
+                                 &s_interp_trace_hi) == 2)
+            s_interp_trace_on = 1;
         atexit(interp_hist_dump);
     }
 }
@@ -1132,6 +1182,13 @@ static int _interp_run_core(CpuState *cpu, uint32_t entry_pc24,
                 ppu_sec_reset();   /* PPU phase-ms split covers window only */
             }
             interp_hist_add(pc_before);
+        }
+        if (s_interp_trace_on) {
+            extern int snes_frame_counter;
+            if (snes_frame_counter >= s_interp_trace_lo &&
+                snes_frame_counter <= s_interp_trace_hi)
+                fprintf(stderr, "[itb] f=%d pc=$%06X\n",
+                        snes_frame_counter, (unsigned)pc_before);
         }
 #endif
 #if SNESRECOMP_REVERSE_DEBUG
