@@ -2094,10 +2094,27 @@ static int _interp_run_core(CpuState *cpu, uint32_t entry_pc24,
         }
         if (s_cycw && pc_before >= s_cycw_lo && pc_before <= s_cycw_hi) {
             extern int snes_frame_counter;
+            /* T105. This block sits AFTER interp816_runOpcode(&in), so what is
+             * printed here is the state the NEXT opcode will see. That makes
+             * `P=` at a `CPX #imm` the flags its following branch reads, and
+             * `NPC=` the PC that opcode actually advanced to - i.e. it answers
+             * "does the branch see a correct Z, and did the instruction take
+             * the length its opcode implies" from the executed stream, without
+             * consulting a decode table.
+             *
+             * `P=` uses the core's own interp816_getFlags() rather than a
+             * bit layout re-derived here, so the printed byte cannot disagree
+             * with what the interpreter branched on. */
             fprintf(stderr,
-                    "[cyc] f=%d pc=$%06X op=$%02X cyc=%d bus_xfers=%u "
+                    "[cyc] f=%d pc=$%06X op=$%02X P=$%02X "
+                    "A=%04X X=%04X Y=%04X SP=%04X D=%04X DB=%02X NPC=%06X "
+                    "cyc=%d bus_xfers=%u "
                     "bus_master=%llu internal=%u master_delta=%llu\n",
                     snes_frame_counter, (unsigned)pc_before, (unsigned)op,
+                    (unsigned)interp816_getFlags(&in),
+                    (unsigned)in.a, (unsigned)in.x, (unsigned)in.y,
+                    (unsigned)in.sp, (unsigned)in.dp, (unsigned)in.db,
+                    (unsigned)(((uint32_t)in.k << 16) | in.pc),
                     _cyc, s_interp_bus_cycles,
                     (unsigned long long)s_interp_bus_master,
                     (unsigned)((unsigned)_cyc > s_interp_bus_cycles
