@@ -25,6 +25,7 @@
 #include <time.h>
 #endif
 #include "interp816.h"
+#include "pc_parse.h"
 
 static const int cyclesPerOpcode[256] = {
   7, 6, 7, 4, 5, 3, 5, 6, 3, 2, 2, 4, 6, 4, 6, 5,
@@ -237,6 +238,42 @@ void interp816_perf_dump(void) {
     s_pc_bucket_total = 0;
 }
 
+/* Full histogram dump (SNESRECOMP_INTERP_PC_DUMP=1): EVERY non-zero bucket,
+ * not just the top 16.
+ *
+ * Why this exists beside interp816_perf_dump(): the init-only vs steady-state
+ * split the brief asks for is a question about ABSOLUTE COUNTS at two frame
+ * counts. A PC whose count does not grow with frames ran a fixed number of
+ * times, most likely once during init; a PC whose count scales with frames is
+ * steady-state. interp816_perf_dump() only ever prints the top 16, and the
+ * brief's own estimate puts the non-spin budget at ~296 instructions/frame
+ * spread over a long tail at 0.1-0.4% each -- none of which makes the top 16
+ * at either 2000 or 9000 frames. Without this dump that tail is unreadable and
+ * the split cannot be asserted from the existing data.
+ *
+ * Does NOT reset the buckets; interp816_perf_dump() still owns the reset, so
+ * this is safe to call before it. Keyed by the same 12-bit multiplicative hash
+ * as the sampler, so a bucket may merge two PCs that hashed alike; the label
+ * is the last PC to hit it. That is recorded as a limitation rather than
+ * hidden -- for the split question a merged bucket is only wrong when it
+ * merges one init PC with one steady-state PC, which is a minority of
+ * collisions.
+ */
+void interp816_pc_dump_all(void) {
+    static int s_on = -1;
+    if (s_on < 0) {
+        const char *e = getenv("SNESRECOMP_INTERP_PC_DUMP");
+        s_on = (e && e[0] && e[0] != '0') ? 1 : 0;
+    }
+    if (!s_on) return;
+    fprintf(stderr, "[pcdump] all %u sampled PCs (1 in 8 opcodes):\n",
+            s_pc_bucket_total);
+    for (int i = 0; i < INTERP_PC_BUCKETS; i++) {
+        if (s_pc_buckets[i])
+            fprintf(stderr, "  $%06X  %u\n", s_pc24[i], s_pc_buckets[i]);
+    }
+}
+
 /* Dump the opcode-cost histogram (SNESRECOMP_INTERP_OPCODE_HIST) sorted by
  * total host-ns, with per-opcode sample count and avg ns/opcode. */
 /* Per-bank execution histogram, aggregated from the same sampled PC buckets
@@ -322,7 +359,24 @@ int interp816_runOpcode(Interp816* cpu) {
     if (s_pcw_on < 0) {
       const char *e = getenv("SNESRECOMP_COUNT_PC");
       s_pcw_on = 1;
-      if (e && e[0]) s_interp_pc_watch = (uint32_t)strtoul(e, NULL, 0);
+      if (e && e[0]) {
+        /* strtoul(e, NULL, 0) auto-detects base: a leading 0 means OCTAL, so
+         * "009311" parsed as 0 and "038026" parsed as 3. Every COUNT_PC run
+         * without the 0x prefix was silently watching $000000. See pc_parse.h.
+         * The strict parser rejects anything it cannot read unambiguously and
+         * the host prints the rejected value, so a bad knob can never again
+         * become a confident count of the wrong address. */
+        uint32_t parsed;
+        if (!pc_parse_count_pc(e, &parsed)) {
+          fprintf(stderr,
+                  "[count] REJECTED SNESRECOMP_COUNT_PC=%s: must be exactly "
+                  "0x followed by six hex digits (e.g. 0x009311). The "
+                  "instrument is not armed; this run's counts are void.\n", e);
+          s_interp_pc_watch = 0x009311; /* documented default */
+        } else {
+          s_interp_pc_watch = parsed;
+        }
+      }
     }
     /* One 24-bit compare per opcode, only when armed. */
     if ((((uint32_t)cpu->k << 16) | cpu->pc) == s_interp_pc_watch)

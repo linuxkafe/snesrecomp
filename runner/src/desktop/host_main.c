@@ -2548,6 +2548,13 @@ static void interp_profile_dump_atexit(void) {
   }
   fprintf(stderr, "[banks] --- interpreted execution by bank ---\n");
   interp816_bank_hist_dump();
+  {
+    /* Full dump: every sampled PC, not just the top 16. Needed for the
+     * init-only vs steady-state split, which is a question about absolute
+     * counts at two frame counts and lives in the long tail. */
+    extern void interp816_pc_dump_all(void);
+    interp816_pc_dump_all();
+  }
   /* The per-bank view says WHERE the interpreter spends its time; the per-PC
    * view says WHICH instructions inside that bank, and that second list is
    * the actual worklist: every one of those addresses is a candidate func

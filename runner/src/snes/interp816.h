@@ -95,3 +95,9 @@ extern int interp816_opcode_hook(uint32_t addr);
 /* Per-bank share of interpreted execution, aggregated from the PC buckets
  * SNESRECOMP_PHASE_MS fills. Prints to stderr and resets them. */
 void interp816_bank_hist_dump(void);
+
+/* Full histogram dump (SNESRECOMP_INTERP_PC_DUMP=1): every non-zero bucket,
+ * not just the top 16. Does NOT reset the buckets. Added for the init-only vs
+ * steady-state split: the non-spin budget is a long tail that the top-16 view
+ * cannot resolve. */
+void interp816_pc_dump_all(void);
