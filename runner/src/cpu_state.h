@@ -427,19 +427,26 @@ void   cpu_write16_paced(CpuState *cpu, uint8 bank, uint16 addr, uint16 v);
 
 /* ── Interrupt-frame ABI (Option-1 cpu->S model) ────────────────────────── */
 
-/* Model the 65816 hardware interrupt-entry push. Hardware pushes, in order
- * (S decreasing): native = PB, PCH, PCL, P (4 bytes); emulation = PCH, PCL,
- * P (3 bytes). The interpreter/event-loop form preserves the real return PC.
+/* Model the 65816 hardware interrupt-entry push. Hardware pushes exactly
+ * THREE bytes (S decreasing): PCH, PCL, P - in BOTH native and emulation mode.
+ * PB and PC are *loaded from the vector* at $FFE4-$FFE7 / $FFEA-$FFED, never
+ * pushed. The interpreter/event-loop form preserves the real return PC.
  * The generated host-C wrapper below uses only the bank and P because its RTI
- * restores the frame before returning through the C call structure. */
+ * restores the frame before returning through the C call structure.
+ *
+ * THIS WAS WRONG HERE AND IT COST A BYTE OF GUEST MEMORY PER INTERRUPT. The
+ * previous text and code read "native = PB, PCH, PCL, P (4 bytes)" and pushed
+ * PB in native mode. Measured on the Deck (T129, 8676 NMI returns, zero
+ * exceptions): native-mode RTI therefore popped 4 and loaded the 4th byte into
+ * DB. It stayed invisible because push-4 and pop-4 are MUTUALLY CONSISTENT, so S
+ * returns to its start and no stack-drift tripwire can fire - a symmetric pair
+ * of wrong operations is invisible to any invariant built on their product.
+ * Internal consistency is not correctness; only the hardware is the referee. */
 static inline void cpu_push_interrupt_frame_at(CpuState *cpu, uint32 pc24) {
     /* Interpreter/event-loop callers provide the architectural 24-bit PC so
      * RTI resumes the suspended instruction stream. Materialize P from the
      * generated flag mirrors before placing the real frame on the stack. */
     cpu_mirrors_to_p(cpu);
-    if (!cpu->emulation) {
-        cpu_write8(cpu, 0x00, cpu->S, (uint8)(pc24 >> 16)); cpu->S = (uint16)(cpu->S - 1);
-    }
     cpu_write8(cpu, 0x00, cpu->S, (uint8)(pc24 >> 8)); cpu->S = (uint16)(cpu->S - 1);  /* PCH */
     cpu_write8(cpu, 0x00, cpu->S, (uint8)pc24); cpu->S = (uint16)(cpu->S - 1);  /* PCL */
     cpu_write8(cpu, 0x00, cpu->S, cpu->P); cpu->S = (uint16)(cpu->S - 1);

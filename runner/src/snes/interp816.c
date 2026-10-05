@@ -1473,7 +1473,13 @@ static void interp816_doOpcode(Interp816* cpu, uint8_t opcode) {
       interp816_setFlags(cpu, interp816_pullByte(cpu));
       cpu->cyclesUsed++; // native mode: 1 extra cycle
       cpu->pc = interp816_pullWord(cpu);
-      cpu->k = interp816_pullByte(cpu);
+      // T129: the 4th pull here was wrong. Native-mode RTI pops THREE bytes -
+      // P, PCL, PCH - and does NOT load DB; PB and PC come from the vector at
+      // entry and were never pushed. The extra pullByte read one byte BELOW the
+      // interrupt frame and wrote it into cpu->k, so DB was overwritten from the
+      // guest stack on every interrupt return. Paired with the 3-byte push in
+      // cpu_state.h:cpu_push_interrupt_frame_at. Emulation mode legitimately pops
+      // a 4th byte (PB) - [NOT ESTABLISHED] whether this game ever RTIs with E=1.
       break;
     }
     case 0x41: { // eor idx
