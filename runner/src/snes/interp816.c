@@ -1059,26 +1059,47 @@ static void interp816_trb(Interp816* cpu, uint32_t low, uint32_t high) {
 static void interp816_doOpcode(Interp816* cpu, uint8_t opcode) {
   switch(opcode) {
     case 0x00: { // brk imp
-      if(cpu->brkHookEnabled) {
-        /* Historical main-CPU bridge marker. Current AOT bounces are selected
-         * before opcode execution, so the marker itself is an inert one-byte
-         * trap. Keep that ABI for the fallback tier without imposing a global
-         * callback symbol on independent coprocessor users. */
-        break;
-      } else {
-        /* BRK is a two-byte instruction. The signature byte is fetched before
-         * the return address is stacked. */
-        interp816_readOpcode(cpu);
-        if(!cpu->e) interp816_pushByte(cpu, cpu->k);
-        interp816_pushWord(cpu, cpu->pc);
-        interp816_pushByte(cpu, interp816_getFlags(cpu) | (cpu->e ? 0x10 : 0));
-        cpu->i = true;
-        cpu->d = false;
-        cpu->k = 0;
-        cpu->pc = cpu->e
-            ? interp816_readWord(cpu, 0xfffe, 0xffff)
-            : interp816_readWord(cpu, 0xffe6, 0xffe7);
-      }
+      /* T132 ARM H: BRK is TWO bytes on the 65816 in EVERY mode - opcode plus
+       * signature byte. The project's own declarative table says so:
+       * snesrecomp/recompiler/snes65816.py carries (0x00,'BRK',IMM,2), length 2.
+       *
+       * We executed it as ONE byte, always: brkHookEnabled is set true
+       * unconditionally in interp816_init() and interp816_set_brk_hook_enabled()
+       * has no callers outside sa1.c, so the early-return was the only path the
+       * main CPU ever took. Since interp816_runOpcode fetches via
+       * interp816_readOpcode() (PC lands on opcode+1), a bare `break` left BRK
+       * one byte long - a live disagreement with our own opcode table.
+       *
+       * It hid because BRK executes ZERO times in the rendering baseline:
+       * T132 censused 6053 distinct PCs / 20,992,708 steps over 9000 frames
+       * across all five banks and found no executed PC with ROM byte $00, and
+       * src/gen's 37 AOT'd BRK sites all dispatch into this interpreter, so an
+       * AOT BRK could not have escaped the census. ARM H measured
+       * EXECUTION-IDENTICAL to the baseline: all 9000 presented crc32,luma rows
+       * and all 1820 bank-$00 per-PC rows byte-identical, the whole dump
+       * differing by one line of host timing.
+       *
+       * The removed branch never called interp816_opcode_hook at all - it was a
+       * bare `break` - and interp816_opcode_hook is `{ (void)addr; return 0; }`
+       * in every definition in the tree. interp816.h:90 says the callback is
+       * "retained for source compatibility. Current bridge dispatch uses
+       * explicit JSR/JSL interception rather than BRK traps."
+       *
+       * brkHookEnabled, its setter and interp816_opcode_hook are all PRESERVED.
+       * The setter is now inert: the architectural path is unconditional, which
+       * is what SA-1 wanted (sa1.c:876,892).
+       *
+       * The signature byte is fetched BEFORE the return address is stacked. */
+      interp816_readOpcode(cpu);
+      if(!cpu->e) interp816_pushByte(cpu, cpu->k);
+      interp816_pushWord(cpu, cpu->pc);
+      interp816_pushByte(cpu, interp816_getFlags(cpu) | (cpu->e ? 0x10 : 0));
+      cpu->i = true;
+      cpu->d = false;
+      cpu->k = 0;
+      cpu->pc = cpu->e
+          ? interp816_readWord(cpu, 0xfffe, 0xffff)
+          : interp816_readWord(cpu, 0xffe6, 0xffe7);
       break;
     }
     case 0x01: { // ora idx
