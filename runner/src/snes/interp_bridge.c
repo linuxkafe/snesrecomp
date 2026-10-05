@@ -2161,9 +2161,8 @@ static int _interp_run_core(CpuState *cpu, uint32_t entry_pc24,
          * real interrupt frame pushed by cpu_push_interrupt_frame(). Its RTI
          * is the host boundary, just as RTS/RTL crossing the entry watermark
          * is for an ordinary subroutine. The interpreter has already popped
-         * P/PC here (three bytes: P, PCL, PCH); host control flow deliberately
-         * discards the guest PC. Do not continue interpreting at the
-         * placeholder return address. */
+         * P/PC/PB here; host control flow deliberately discards guest PC/PB.
+         * Do not continue interpreting at the placeholder return address. */
         if (stop_on_rti && op == 0x40) {
             sync_interp_to_cpu(&in, cpu);
             bridge_apu_flush(cpu);
