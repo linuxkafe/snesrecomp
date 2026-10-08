@@ -381,6 +381,29 @@ int interp816_runOpcode(Interp816* cpu) {
     /* One 24-bit compare per opcode, only when armed. */
     if ((((uint32_t)cpu->k << 16) | cpu->pc) == s_interp_pc_watch)
       s_interp_pc_count++;
+    /* T095: dump CPU state at $00:8222 (RTI entry into bank $03).
+     * Fires once — first hit only — to avoid flooding stderr. */
+    {
+      static int _t095_done = 0;
+      if ((((uint32_t)cpu->k << 16) | cpu->pc) == 0x008222 && !_t095_done) {
+        _t095_done = 1;
+        uint32_t stack_addr = 0x0100u | (cpu->sp & 0xFFu);
+        uint8_t b0 = interp816_read(cpu, stack_addr);
+        uint8_t b1 = interp816_read(cpu, stack_addr + 1);
+        uint8_t b2 = interp816_read(cpu, stack_addr + 2);
+        uint8_t b3 = interp816_read(cpu, stack_addr + 3);
+        uint8_t p = ((uint8_t)cpu->n << 7) | ((uint8_t)cpu->v << 6) | 0x20u |
+                    ((uint8_t)cpu->d << 4) | ((uint8_t)cpu->i << 3) |
+                    ((uint8_t)cpu->z << 2) | ((uint8_t)cpu->c << 1) |
+                    ((uint8_t)cpu->xf << 0) | ((uint8_t)cpu->mf << 0);
+        fprintf(stderr,
+                "[t095] $00:8222 RTI state: pc=$%06X pb=$%02X p=$%02X sp=$%04X "
+                "stack[S..S+3]=%02X %02X %02X %02X\n",
+                (unsigned)((uint32_t)cpu->k << 16 | cpu->pc),
+                (unsigned)cpu->k, p, (unsigned)cpu->sp,
+                b0, b1, b2, b3);
+      }
+    }
   }
   /* getenv() walks the whole environment block on MSVC (~us) - cache it so
    * the hot path pays a branch, not a CRT call, per interpreted instruction.
